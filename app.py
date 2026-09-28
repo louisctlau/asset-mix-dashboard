@@ -233,12 +233,11 @@ if tool == "Asset Mix":
     with c2:
         st.subheader("Weight drift (latest vs target)")
         drift = pd.DataFrame({
-            "Target": weights,
-            "Current": whist.iloc[-1],
+            "Target %": weights * 100,
+            "Current %": whist.iloc[-1] * 100,
         })
-        drift["Drift (pp)"] = (drift["Current"] - drift["Target"]) * 100
-        drift = (drift * 100).round(1)
-        drift.columns = ["Target %", "Current %", "Drift (pp)"]
+        drift["Drift (pp)"] = drift["Current %"] - drift["Target %"]
+        drift = drift.round(1)
         st.dataframe(drift.sort_values("Drift (pp)", key=abs, ascending=False),
                      use_container_width=True)
         st.caption(f"Rebalancing: {rebalance.lower()} · "

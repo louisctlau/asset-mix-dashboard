@@ -1,9 +1,17 @@
-# Asset Mix Dashboard
+# Portfolio Lab
 
-A Streamlit app for analyzing a **hypothetical portfolio**: define an asset
-mix (tickers + target weights) and see what it would have done — allocation,
-growth of capital vs benchmark, risk stats (CAGR, volatility, Sharpe, max
-drawdown), drawdowns, holding correlations, and weight drift.
+Two tools in one Streamlit app:
+
+**Asset Mix Dashboard** — define a hypothetical asset mix (tickers + target
+weights) and see what it would have done: allocation, growth of capital vs
+benchmark, risk stats (CAGR, volatility, Sharpe, max drawdown), drawdowns,
+holding correlations, and weight drift.
+
+**Strategy Tester** — backtest stock/option strategies on historical prices
+with options priced by Black-Scholes (European, no early exercise, no
+bid/ask). Strategies: Buy & Hold, Covered Call, Cash-Secured Put, Bull Call
+Spread, Bear Put Spread, Long Straddle, Iron Condor. Strikes are set by delta
+target at entry; positions are held to expiry and rolled immediately.
 
 ## Run locally
 

@@ -32,8 +32,16 @@ tool = st.sidebar.radio("Tool", ["Asset Mix", "Strategy Tester"],
 @st.cache_data(ttl=86400, show_spinner=False)
 def load_closes(tickers: tuple, period: str) -> pd.DataFrame:
     """Adjusted closes (dividends reinvested) for the given tickers."""
-    data = yf.download(list(tickers), period=period, auto_adjust=True,
-                       progress=False)
+    last_err = None
+    for _ in range(3):
+        try:
+            data = yf.download(list(tickers), period=period, auto_adjust=True,
+                               progress=False)
+            break
+        except Exception as e:  # transient Yahoo failure; retry
+            last_err = e
+    else:
+        raise RuntimeError(f"Yahoo Finance fetch failed: {last_err}")
     if isinstance(data.columns, pd.MultiIndex):
         closes = data["Close"]
     else:  # single ticker
@@ -154,6 +162,10 @@ if tool == "Asset Mix":
         st.stop()
     weights = weights / weights.sum()
     closes = closes.dropna()
+    if closes.empty or not set(weights.index) <= set(closes.columns):
+        st.error("Market data is temporarily unavailable — please try again "
+                 "in a minute.")
+        st.stop()
 
     prices = closes[[t for t in weights.index]]
     port_rets, whist = simulate(prices, weights, rebalance)

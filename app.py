@@ -31,8 +31,15 @@ tool = st.sidebar.radio("Tool", ["Asset Mix", "Strategy Tester"],
 
 @st.cache_data(ttl=86400, show_spinner=False)
 def load_closes(tickers: tuple, period: str) -> pd.DataFrame:
-    """Adjusted closes (dividends reinvested) for the given tickers."""
+    """Adjusted closes (dividends reinvested) for the given tickers.
+
+    Raises RuntimeError if Yahoo returns nothing for any requested ticker.
+    Partial frames are never returned, so a transient single-ticker gap can
+    never be cached and replayed for the full 24h TTL (exceptions raised
+    here are not cached by st.cache_data — the next visit retries fresh).
+    """
     last_err = None
+    data = None
     for _ in range(3):
         try:
             data = yf.download(list(tickers), period=period, auto_adjust=True,
@@ -46,7 +53,13 @@ def load_closes(tickers: tuple, period: str) -> pd.DataFrame:
         closes = data["Close"]
     else:  # single ticker
         closes = data[["Close"]].rename(columns={"Close": tickers[0]})
-    return closes.dropna(how="all")
+    closes = closes.dropna(how="all")
+    missing = [t for t in tickers
+               if t not in closes.columns or closes[t].dropna().empty]
+    if missing:
+        raise RuntimeError(
+            f"Yahoo Finance returned no data for: {', '.join(missing)}")
+    return closes
 
 
 def simulate(prices: pd.DataFrame, target_w: pd.Series,
@@ -147,22 +160,17 @@ if tool == "Asset Mix":
         needed.add("SPY")
 
     with st.spinner("Fetching market data…"):
-        closes = load_closes(tuple(sorted(needed)), PERIODS[lookback])
+        try:
+            closes = load_closes(tuple(sorted(needed)), PERIODS[lookback])
+        except RuntimeError:
+            # load_closes raises on total failure or a partial frame (the
+            # latter is never cached, so the next visit retries fresh).
+            st.error("Market data is temporarily unavailable — please try "
+                     "again in a minute.")
+            st.stop()
 
-    bad = [t for t in needed if t not in closes.columns
-           or closes[t].dropna().empty]
-    if bad:
-        st.warning(f"Couldn't fetch data for: {', '.join(sorted(bad))} — excluded.")
-    for t in bad:
-        needed.discard(t)
-        if t in weights.index:
-            weights = weights.drop(t)
-    if weights.empty:
-        st.error("No usable holdings left.")
-        st.stop()
-    weights = weights / weights.sum()
     closes = closes.dropna()
-    if closes.empty or not set(weights.index) <= set(closes.columns):
+    if closes.empty:
         st.error("Market data is temporarily unavailable — please try again "
                  "in a minute.")
         st.stop()
@@ -272,10 +280,12 @@ else:
         st.stop()
 
     with st.spinner("Fetching market data…"):
-        closes = load_closes((ticker,), PERIODS[lookback])
-    if ticker not in closes.columns or closes[ticker].dropna().empty:
-        st.error(f"Couldn't fetch data for {ticker}.")
-        st.stop()
+        try:
+            closes = load_closes((ticker,), PERIODS[lookback])
+        except RuntimeError:
+            st.error(f"Couldn't fetch data for {ticker} — please try again "
+                     "in a minute.")
+            st.stop()
     prices = closes[ticker].dropna()
 
     mode = "fixed" if vol_mode == "Fixed IV" else "realized"

@@ -1,0 +1,32 @@
+# Changelog — Portfolio Lab
+
+## 2026-10-05 — Options Analytics: any-ticker input
+- The Ticker control is now a free-text input — any US stock or ETF with
+  listed options works (verified live: TSLA, QQQ, SPY). Cash index options
+  (SPX, RUT, NDX, VIX) are blocked by CBOE on the free delayed endpoint;
+  SPY/QQQ serve as the liquid index proxies.
+
+## 2026-10-05 — Options Analytics tab
+- New third tool: greeks (delta, gamma, theta, vanna, charm) and the
+  volatility surface — smile (IV vs strike per expiry), 25Δ risk reversal
+  and butterfly skew across expiries, ATM-IV term structure — on the live
+  CBOE delayed option chain (~15 min, no key). New modules `greeks.py`
+  (Black-Scholes, verified against finite differences), `chains.py` (chain
+  fetch), `volsurface.py` (smile/skew/term structure).
+- Dividend yield now uses Yahoo's `trailingAnnualDividendYield` (a true
+  ratio). The old `dividendYield` field is in percent units and overstated
+  q ~100× (showed q=43.00% for NVDA).
+
+## 2026-09-28 — Strategy Tester tab
+- Backtest 7 stock/option strategies (Buy & Hold, Covered Call,
+  Cash-Secured Put, Bull Call Spread, Bear Put Spread, Long Straddle, Iron
+  Condor) on historical prices with Black-Scholes pricing (European, no
+  early exercise, no bid/ask). Strikes set by delta target at entry,
+  positions held to expiry and rolled immediately.
+
+## 2026-09-28 — App launch: Asset Mix Dashboard
+- Hypothetical portfolio builder: editable ticker/weight table, allocation
+  donut, growth of capital vs SPY or 60/40 benchmark, CAGR, volatility,
+  Sharpe, max drawdown, best/worst year, drawdown chart, holding
+  correlations, weight drift vs target.
+- Fixed the weight-drift column rendering 100× too large.

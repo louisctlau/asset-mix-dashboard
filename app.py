@@ -11,6 +11,7 @@ volatility surface (smile, skew, term structure) on the live CBOE delayed
 option chain.
 """
 from datetime import datetime, timezone
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -517,3 +518,9 @@ elif tool == "Options Analytics":
                f"r={oa_rf:.1%}, q={q:.2%} · Greeks via Black-Scholes "
                "(European); listed equity options are American-style, so "
                "deep-ITM greeks are approximate. Not investment advice.")
+
+
+# ============================== CHANGELOG ==============================
+with st.sidebar.expander("Changelog"):
+    st.markdown(
+        (Path(__file__).resolve().parent / "CHANGELOG.md").read_text())

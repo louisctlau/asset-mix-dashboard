@@ -86,10 +86,15 @@ def load_chain_bundle(ticker: str):
 
 @st.cache_data(ttl=86400, show_spinner=False)
 def div_yield(ticker: str) -> float:
-    """Trailing dividend yield as a fraction; 0 on any failure."""
+    """Trailing dividend yield as a fraction; 0 on any failure.
+
+    Uses trailingAnnualDividendYield (a true ratio). Note: Yahoo's
+    `dividendYield` field is in percent units (e.g. 0.43 for NVDA) and
+    must NOT be used directly.
+    """
     try:
-        y = yf.Ticker(ticker).info.get("dividendYield") or 0.0
-        return max(float(y), 0.0)
+        y = yf.Ticker(ticker).info.get("trailingAnnualDividendYield") or 0.0
+        return min(max(float(y), 0.0), 0.25)
     except Exception:
         return 0.0
 

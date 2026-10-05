@@ -1,5 +1,10 @@
 # Changelog — Portfolio Lab
 
+## 2026-10-05 — Options Analytics: auto risk-free rate
+- The manual risk-free rate input is gone — the tab now uses the live 3M
+  T-bill yield (^IRX via Yahoo, 24h cache, 4% fallback), shown in the
+  footer (e.g. "r=4.0% (3M T-bill)").
+
 ## 2026-10-05 — Gamma exposure (GEX)
 - New GEX section in Options Analytics: net gamma exposure by strike
   ($M/pt) over the nearest 3 expiries, with call/put walls and the

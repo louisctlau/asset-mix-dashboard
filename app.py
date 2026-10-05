@@ -87,6 +87,20 @@ def load_chain_bundle(ticker: str):
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
+def risk_free_rate() -> float:
+    """3M T-bill yield (^IRX) as a fraction; 4% on any failure."""
+    try:
+        hist = yf.Ticker("^IRX").history(period="5d")
+        if not hist.empty:
+            y = float(hist["Close"].iloc[-1]) / 100.0
+            if 0.0 < y < 0.25:
+                return y
+    except Exception:
+        pass
+    return 0.04
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
 def div_yield(ticker: str) -> float:
     """Trailing dividend yield as a fraction; 0 on any failure.
 
@@ -387,9 +401,6 @@ elif tool == "Options Analytics":
 
     st.sidebar.header("Chain")
     oa_ticker = st.sidebar.text_input("Ticker", value="NVDA").strip().upper()
-    oa_rf = st.sidebar.number_input("Risk-free rate %", min_value=0.0,
-                                    max_value=20.0, value=4.0,
-                                    step=0.25) / 100.0
 
     if not oa_ticker:
         st.warning("Enter a ticker.")
@@ -399,6 +410,7 @@ elif tool == "Options Analytics":
         try:
             chain, spot, fetched_at = load_chain_bundle(oa_ticker)
             q = div_yield(oa_ticker)
+            rf = risk_free_rate()
         except RuntimeError:
             st.error(f"Couldn't load an option chain for {oa_ticker} — "
                      "check the symbol (US stocks and ETFs) and try again "
@@ -494,7 +506,7 @@ elif tool == "Options Analytics":
               "theta": "Θ ($/day)", "vanna": "dΔ per vol point",
               "charm": "dΔ per day"}[gkey]
     with st.spinner("Computing greeks…"):
-        cg = vol.chain_greeks(chain, exp, spot, oa_rf, q)
+        cg = vol.chain_greeks(chain, exp, spot, rf, q)
     if cg.empty:
         st.warning("No quoted contracts for this expiry.")
     else:
@@ -534,7 +546,7 @@ elif tool == "Options Analytics":
         st.dataframe(disp, use_container_width=True)
 
     st.caption(f"Chain as of {fetched_at:%H:%M} UTC (CBOE delayed ~15 min) · "
-               f"r={oa_rf:.1%}, q={q:.2%} · Greeks via Black-Scholes "
+               f"r={rf:.1%} (3M T-bill), q={q:.2%} · Greeks via Black-Scholes "
                "(European); listed equity options are American-style, so "
                "deep-ITM greeks are approximate. Not investment advice.")
 

@@ -5,7 +5,13 @@ what it would have done on Yahoo Finance total-return data.
 
 Strategy Tester: backtest stock/option strategies on historical prices with
 options priced by Black-Scholes (European, no early exercise, no bid/ask).
+
+Options Analytics: greeks (delta, gamma, theta, vanna, charm) and the
+volatility surface (smile, skew, term structure) on the live CBOE delayed
+option chain.
 """
+from datetime import datetime, timezone
+
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -13,7 +19,9 @@ import plotly.graph_objects as go
 import streamlit as st
 import yfinance as yf
 
+import chains
 import strategy as stg
+import volsurface as vol
 
 st.set_page_config(page_title="Portfolio Lab", layout="wide")
 
@@ -25,7 +33,8 @@ DEFAULT_HOLDINGS = pd.DataFrame(
 )
 
 st.sidebar.header("Tool")
-tool = st.sidebar.radio("Tool", ["Asset Mix", "Strategy Tester"],
+tool = st.sidebar.radio("Tool",
+                        ["Asset Mix", "Strategy Tester", "Options Analytics"],
                         label_visibility="collapsed")
 
 
@@ -60,6 +69,29 @@ def load_closes(tickers: tuple, period: str) -> pd.DataFrame:
         raise RuntimeError(
             f"Yahoo Finance returned no data for: {', '.join(missing)}")
     return closes
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def load_chain_bundle(ticker: str):
+    """Live CBOE delayed chain + underlying + fetch time (15-min cache).
+
+    Raises RuntimeError on fetch failure or an empty chain (never cached,
+    so the next visit retries fresh).
+    """
+    chain, spot = chains.fetch_chain(ticker)
+    if chain.empty or spot is None:
+        raise RuntimeError(f"No chain data for {ticker}")
+    return chain, spot, datetime.now(timezone.utc)
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def div_yield(ticker: str) -> float:
+    """Trailing dividend yield as a fraction; 0 on any failure."""
+    try:
+        y = yf.Ticker(ticker).info.get("dividendYield") or 0.0
+        return max(float(y), 0.0)
+    except Exception:
+        return 0.0
 
 
 def simulate(prices: pd.DataFrame, target_w: pd.Series,
@@ -255,7 +287,7 @@ if tool == "Asset Mix":
                "daily. Hypothetical backtest — not investment advice.")
 
 # ========================== STRATEGY TESTER ==========================
-else:
+elif tool == "Strategy Tester":
     st.title("Strategy Tester")
     st.caption("Black-Scholes backtest — modeled option prices on historical "
                "stock data.")
@@ -339,3 +371,139 @@ else:
         "to expiry, rolled immediately. No bid/ask spread, no commissions, "
         "no early exercise. Fixed size (1 contract / 100 shares), "
         "non-compounded. Hypothetical backtest — not investment advice.")
+
+# ========================= OPTIONS ANALYTICS =========================
+elif tool == "Options Analytics":
+    st.title("Options Analytics")
+    st.caption("Greeks and the volatility surface on the live CBOE delayed "
+               "option chain (~15 min).")
+
+    st.sidebar.header("Chain")
+    oa_ticker = st.sidebar.selectbox("Ticker", chains.TICKERS, index=0)
+    oa_rf = st.sidebar.number_input("Risk-free rate %", min_value=0.0,
+                                    max_value=20.0, value=4.0,
+                                    step=0.25) / 100.0
+
+    with st.spinner(f"Fetching {oa_ticker} option chain…"):
+        try:
+            chain, spot, fetched_at = load_chain_bundle(oa_ticker)
+            q = div_yield(oa_ticker)
+        except RuntimeError:
+            st.error("Chain data is temporarily unavailable — please try "
+                     "again in a minute.")
+            st.stop()
+
+    exp_list = [e for e in vol.expiries(chain) if vol.dte(e) >= 1]
+    if not exp_list:
+        st.error("No expiries in the chain — please try again in a minute.")
+        st.stop()
+    front = exp_list[0]
+    ts = vol.term_structure(chain, spot)
+    sk = vol.skew(chain, front, spot)
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Underlying", f"${spot:,.2f}")
+    c2.metric(f"ATM IV ({vol.dte(front)}d)",
+              f"{sk['atm_iv']:.1%}" if sk["atm_iv"] else "—")
+    rr = sk["risk_reversal_25"]
+    c3.metric("25Δ risk reversal", f"{rr:+.1%}" if rr is not None else "—")
+    slope = None
+    atm_series = ts["atm_iv"].dropna()
+    if len(atm_series) >= 2:
+        slope = atm_series.iloc[-1] - atm_series.iloc[0]
+    c4.metric("Term slope (ATM IV)", f"{slope:+.1%}"
+              if slope is not None else "—")
+
+    exp = st.selectbox("Expiry", exp_list,
+                       format_func=lambda e: f"{e.date()} ({vol.dte(e)}d)")
+
+    left, right = st.columns(2)
+    with left:
+        st.subheader(f"Vol smile — {exp.date()}")
+        sm = vol.smile(chain, exp)
+        sfig = go.Figure()
+        sfig.add_trace(go.Scatter(x=sm["strike"], y=sm["call_iv"] * 100,
+                                  name="Calls", mode="lines+markers"))
+        sfig.add_trace(go.Scatter(x=sm["strike"], y=sm["put_iv"] * 100,
+                                  name="Puts", mode="lines+markers"))
+        sfig.add_vline(x=spot, line_dash="dash", line_color="gray")
+        sfig.update_layout(yaxis_title="IV %", xaxis_title="Strike",
+                           height=340, margin=dict(t=10, b=10, l=10, r=10),
+                           legend=dict(orientation="h", y=1.05))
+        st.plotly_chart(sfig, use_container_width=True)
+    with right:
+        st.subheader("Term structure — ATM IV")
+        tfig = go.Figure()
+        tfig.add_trace(go.Scatter(x=ts["dte"], y=ts["atm_iv"] * 100,
+                                  mode="lines+markers", name="ATM IV"))
+        tfig.update_layout(yaxis_title="IV %", xaxis_title="Days to expiry",
+                           height=340, margin=dict(t=10, b=10, l=10, r=10),
+                           showlegend=False)
+        st.plotly_chart(tfig, use_container_width=True)
+
+    st.subheader("Skew — 25Δ risk reversal & butterfly by expiry")
+    kfig = go.Figure()
+    kfig.add_trace(go.Scatter(x=ts["dte"], y=ts["risk_reversal_25"] * 100,
+                              mode="lines+markers", name="Risk reversal 25Δ"))
+    kfig.add_trace(go.Scatter(x=ts["dte"], y=ts["butterfly_25"] * 100,
+                              mode="lines+markers", name="Butterfly 25Δ"))
+    kfig.add_hline(y=0, line_dash="dash", line_color="gray")
+    kfig.update_layout(yaxis_title="Vol points",
+                       xaxis_title="Days to expiry", height=300,
+                       margin=dict(t=10, b=10, l=10, r=10),
+                       legend=dict(orientation="h", y=1.05))
+    st.plotly_chart(kfig, use_container_width=True)
+    st.caption("Risk reversal < 0: downside puts pricier than upside calls — "
+               "the usual equity put skew. Butterfly: smile convexity.")
+
+    st.subheader("Greeks by strike")
+    gname = st.selectbox("Greek", ["Delta", "Gamma", "Theta", "Vanna", "Charm"],
+                         index=1)
+    gkey = gname.lower()
+    glabel = {"delta": "Δ (per share)", "gamma": "Γ (per $1 move)",
+              "theta": "Θ ($/day)", "vanna": "dΔ per vol point",
+              "charm": "dΔ per day"}[gkey]
+    with st.spinner("Computing greeks…"):
+        cg = vol.chain_greeks(chain, exp, spot, oa_rf, q)
+    if cg.empty:
+        st.warning("No quoted contracts for this expiry.")
+    else:
+        gfig = go.Figure()
+        for otype, nm in (("call", "Calls"), ("put", "Puts")):
+            sub = cg[cg["type"] == otype]
+            gfig.add_trace(go.Scatter(x=sub["strike"], y=sub[gkey],
+                                      mode="lines+markers", name=nm))
+        gfig.update_layout(yaxis_title=glabel, xaxis_title="Strike",
+                           height=340, margin=dict(t=10, b=10, l=10, r=10),
+                           legend=dict(orientation="h", y=1.05))
+        st.plotly_chart(gfig, use_container_width=True)
+        if gkey == "vanna":
+            st.caption("Vanna > 0: the position's delta grows if vol rises — "
+                       "long-vol positions get longer into a spike.")
+        elif gkey == "charm":
+            st.caption("Charm: delta bleed per passing day, all else equal.")
+
+        st.subheader(f"Chain — {exp.date()} (model greeks)")
+        wide = cg.pivot(index="strike", columns="type")
+        wide.columns = [f"{c}_{t}" for c, t in wide.columns]
+        disp = pd.DataFrame(index=wide.index)
+        for t in ("call", "put"):
+            T = t[0].upper()
+            if f"iv_{t}" in wide:
+                disp[f"{T} IV %"] = (wide[f"iv_{t}"] * 100).round(1)
+            for g_, dec in (("delta", 3), ("gamma", 4), ("theta", 4),
+                            ("vanna", 4), ("charm", 4)):
+                col = f"{g_}_{t}"
+                if col in wide:
+                    disp[f"{T} {g_}"] = wide[col].round(dec)
+            if f"open_interest_{t}" in wide:
+                disp[f"{T} OI"] = wide[f"open_interest_{t}"].fillna(0).astype(int)
+            if f"volume_{t}" in wide:
+                disp[f"{T} vol"] = wide[f"volume_{t}"].fillna(0).astype(int)
+        disp.index.name = "Strike"
+        st.dataframe(disp, use_container_width=True)
+
+    st.caption(f"Chain as of {fetched_at:%H:%M} UTC (CBOE delayed ~15 min) · "
+               f"r={oa_rf:.1%}, q={q:.2%} · Greeks via Black-Scholes "
+               "(European); listed equity options are American-style, so "
+               "deep-ITM greeks are approximate. Not investment advice.")

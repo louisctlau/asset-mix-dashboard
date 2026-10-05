@@ -384,18 +384,23 @@ elif tool == "Options Analytics":
                "option chain (~15 min).")
 
     st.sidebar.header("Chain")
-    oa_ticker = st.sidebar.selectbox("Ticker", chains.TICKERS, index=0)
+    oa_ticker = st.sidebar.text_input("Ticker", value="NVDA").strip().upper()
     oa_rf = st.sidebar.number_input("Risk-free rate %", min_value=0.0,
                                     max_value=20.0, value=4.0,
                                     step=0.25) / 100.0
+
+    if not oa_ticker:
+        st.warning("Enter a ticker.")
+        st.stop()
 
     with st.spinner(f"Fetching {oa_ticker} option chain…"):
         try:
             chain, spot, fetched_at = load_chain_bundle(oa_ticker)
             q = div_yield(oa_ticker)
         except RuntimeError:
-            st.error("Chain data is temporarily unavailable — please try "
-                     "again in a minute.")
+            st.error(f"Couldn't load an option chain for {oa_ticker} — "
+                     "check the symbol (US stocks and ETFs) and try again "
+                     "in a minute.")
             st.stop()
 
     exp_list = [e for e in vol.expiries(chain) if vol.dte(e) >= 1]

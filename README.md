@@ -14,7 +14,8 @@ Spread, Bear Put Spread, Long Straddle, Iron Condor. Strikes are set by delta
 target at entry; positions are held to expiry and rolled immediately.
 
 **Options Analytics** — greeks and the volatility surface on the live CBOE
-delayed option chain (~15 min, no key) for NVDA, AMD, MU, AAPL, META, GOOG:
+delayed option chain (~15 min, no key) for any US-listed stock or ETF with
+listed options — type any ticker:
 - Greeks: delta, gamma, theta, vanna, charm per contract (`greeks.py`,
   Black-Scholes with dividend yield; theta/charm per calendar day, vanna per
   vol point). Vanna and charm are not published by CBOE — computed here.

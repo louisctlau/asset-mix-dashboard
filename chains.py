@@ -12,7 +12,8 @@ import urllib.request
 
 import pandas as pd
 
-TICKERS = ["NVDA", "AMD", "MU", "AAPL", "META", "GOOG"]
+TICKERS = ["NVDA", "AMD", "MU", "AAPL", "META", "GOOG"]  # archive universe;
+# the app itself accepts any ticker with a CBOE delayed chain.
 CBOE_URL = "https://cdn.cboe.com/api/global/delayed_quotes/options/{}.json"
 
 

@@ -21,6 +21,7 @@ import streamlit as st
 import yfinance as yf
 
 import chains
+import gex
 import strategy as stg
 import volsurface as vol
 
@@ -466,6 +467,24 @@ elif tool == "Options Analytics":
     st.plotly_chart(kfig, use_container_width=True)
     st.caption("Risk reversal < 0: downside puts pricier than upside calls — "
                "the usual equity put skew. Butterfly: smile convexity.")
+
+    st.subheader("Gamma exposure (GEX)")
+    st.caption("Dealer positioning: long calls / short puts. Positive GEX "
+               "dampens moves (pinning); negative GEX amplifies them.")
+    with st.spinner("Computing gamma exposure…"):
+        try:
+            gg = gex.gex_by_strike(chain, spot)
+        except RuntimeError:
+            gg = None
+    if gg is None:
+        st.warning("No usable open interest / gamma in the chain.")
+    else:
+        gfig = gex.gex_chart(gg, f"Net GEX by strike — {oa_ticker} ($M/pt)")
+        gfig.update_layout(height=340, margin=dict(t=10, b=10, l=10, r=10))
+        st.plotly_chart(gfig, use_container_width=True)
+        exp_str = ", ".join(pd.Timestamp(e).strftime("%b %d")
+                            for e in gg["expiries"])
+        st.caption(gex.gex_read(gg) + f" Nearest 3 expiries: {exp_str}.")
 
     st.subheader("Greeks by strike")
     gname = st.selectbox("Greek", ["Delta", "Gamma", "Theta", "Vanna", "Charm"],

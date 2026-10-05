@@ -79,7 +79,7 @@ def gex_chart(g: dict, title: str) -> go.Figure:
                       annotation_text=f"Call wall {g['call_wall']:.0f}")
     if g["zero_gamma"]:
         fig.add_vline(x=g["zero_gamma"], line_color="#f1c40f", line_dash="dot",
-                      annotation_text=f"0γ {g['zero_gamma']:.0f}")
+                      annotation_text=f"γflip {g['zero_gamma']:.0f}")
     fig.update_layout(title=title, height=380, margin=dict(t=40, b=10),
                       xaxis_title="Strike",
                       yaxis_title="Net GEX ($M per 1-pt move)",
@@ -93,6 +93,6 @@ def gex_read(g: dict) -> str:
     tone = ("dealers long gamma — moves tend to be dampened/pinned"
             if t > 0 else
             "dealers short gamma — moves tend to be amplified")
-    zg = (f" Zero-gamma at {g['zero_gamma']:.0f}: below it, dealers are "
+    zg = (f" γflip at {g['zero_gamma']:.0f}: below it, dealers are "
           f"short gamma and moves can accelerate." if g["zero_gamma"] else "")
     return f"Net GEX ${t:+.0f}M/pt — {tone}.{zg}"

@@ -12,6 +12,7 @@
   US Market Sentiment app (`GEX = (call OI × call γ − put OI × put γ) × 100
   × spot`, CBOE listed gamma). Cross-validated bit-identical vs USMS on
   SPY (net +$754M, walls 776/770, 0γ 772).
+- The zero-gamma line is labeled "γflip" (chart + read line).
 
 ## 2026-10-05 — Options Analytics: any-ticker input
 - The Ticker control is now a free-text input — any US stock or ETF with

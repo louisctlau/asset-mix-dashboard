@@ -22,9 +22,9 @@ listed options — type any ticker:
 - Volatility: smile (IV vs strike per expiry), 25-delta risk reversal and
   butterfly skew across expiries, ATM-IV term structure (`volsurface.py`,
   using CBOE's listed IVs).
-- Gamma exposure: net GEX by strike ($M/pt) over the nearest 3 expiries
-  with call/put walls and zero-gamma (`gex.py`) — same convention as the
-  US Market Sentiment app.
+- Gamma exposure: net GEX by strike ($M/pt) over the nearest 3 expiries,
+  bars stacked/colored by expiry, with call/put walls and γflip (`gex.py`)
+  — same convention as the US Market Sentiment app.
 
 ## Run locally
 

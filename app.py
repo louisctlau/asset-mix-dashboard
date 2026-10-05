@@ -492,7 +492,6 @@ elif tool == "Options Analytics":
         st.warning("No usable open interest / gamma in the chain.")
     else:
         gfig = gex.gex_chart(gg, f"Net GEX by strike — {oa_ticker} ($M/pt)")
-        gfig.update_layout(height=340, margin=dict(t=10, b=10, l=10, r=10))
         st.plotly_chart(gfig, use_container_width=True)
         exp_str = ", ".join(pd.Timestamp(e).strftime("%b %d")
                             for e in gg["expiries"])

@@ -1,5 +1,10 @@
 # Changelog — Portfolio Lab
 
+## 2026-10-05 — GEX chart: expiry color-coding
+- The GEX chart now stacks each strike's bar by expiry (one color per
+  expiry, positive gamma right / negative left, horizontal) — the bar total
+  is still the net per strike. Spot, walls and γflip overlaid as before.
+
 ## 2026-10-05 — Options Analytics: auto risk-free rate
 - The manual risk-free rate input is gone — the tab now uses the live 3M
   T-bill yield (^IRX via Yahoo, 24h cache, 4% fallback), shown in the

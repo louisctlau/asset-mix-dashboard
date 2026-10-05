@@ -9,13 +9,19 @@ Positive net GEX = dealers long gamma (dampens moves, pinning);
 negative = dealers short gamma (amplifies moves). [gex-v5]
 
 Gamma input is CBOE's listed per-contract gamma (same source as USMS);
-open interest is prior-day.
+open interest is prior-day. The chart stacks each strike's bar by expiry
+(one color per expiry), like the LIETA dealer-hedging view.
 """
 from __future__ import annotations
+
+from datetime import date
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+
+_EXPIRY_COLORS = ["#636EFA", "#EF553B", "#00CC96", "#AB63FA", "#FFA15A",
+                  "#19D3F3", "#FF6692", "#B6E880", "#FF97FF", "#FECB52"]
 
 
 def gex_by_strike(chain: pd.DataFrame, spot: float,
@@ -40,6 +46,9 @@ def gex_by_strike(chain: pd.DataFrame, spot: float,
     piv["net_gex"] = piv["calls"] + piv["puts"]  # puts already negative
     piv = piv.sort_index()
 
+    exp_piv = df.pivot_table(index="strike", columns="expiry", values="gex_m",
+                             aggfunc="sum").fillna(0.0).sort_index()
+
     total_net = float(piv["net_gex"].sum())
     above = piv[piv.index >= spot]
     below = piv[piv.index <= spot]
@@ -54,36 +63,51 @@ def gex_by_strike(chain: pd.DataFrame, spot: float,
     zero_gamma = float(hits[0]) if len(hits) else None
 
     return {"spot": spot, "expiries": expiries,
-            "strikes": piv.reset_index(), "total_net": total_net,
+            "strikes": piv.reset_index(),
+            "by_expiry": exp_piv,  # strike-indexed, one column per expiry
+            "total_net": total_net,
             "call_wall": call_wall, "put_wall": put_wall,
             "zero_gamma": zero_gamma}
 
 
+def _expiry_label(exp) -> str:
+    e = pd.Timestamp(exp)
+    dte = max((e.date() - date.today()).days, 0)
+    return f"{e.strftime('%b %d')} · {dte}d"
+
+
 def gex_chart(g: dict, title: str) -> go.Figure:
-    """Net GEX by strike ($M per 1-pt move): call gamma up, put gamma down.
-    Spot, walls, zero-gamma overlaid."""
-    df = g["strikes"]
+    """Net GEX by strike ($M per 1-pt move), stacked by expiry: positive
+    gamma extends right, negative left; the bar total is the net per strike.
+    Spot, walls, γflip overlaid."""
+    df = g["by_expiry"]
     spot = g["spot"]
-    df = df[(df["strike"] >= spot * 0.92) & (df["strike"] <= spot * 1.08)]
-    y = df["net_gex"]
-    colors = ["#2ecc71" if v >= 0 else "#e74c3c" for v in y]
-    fig = go.Figure(go.Bar(x=df["strike"], y=y, marker_color=colors,
-                           name="GEX by strike ($M/pt)"))
-    fig.add_vline(x=spot, line_color="#1f77b4", line_width=2,
+    df = df[(df.index >= spot * 0.92) & (df.index <= spot * 1.08)]
+    fig = go.Figure()
+    for i, exp in enumerate(g["expiries"]):
+        if exp not in df.columns:
+            continue
+        fig.add_trace(go.Bar(y=df.index, x=df[exp], orientation="h",
+                             name=_expiry_label(exp),
+                             marker_color=_EXPIRY_COLORS[
+                                 i % len(_EXPIRY_COLORS)]))
+    fig.add_hline(y=spot, line_color="#1f77b4", line_width=2,
                   annotation_text=f"Spot {spot:.0f}")
     if g["put_wall"]:
-        fig.add_vline(x=g["put_wall"], line_color="#2ecc71", line_dash="dash",
+        fig.add_hline(y=g["put_wall"], line_color="#2ecc71", line_dash="dash",
                       annotation_text=f"Put wall {g['put_wall']:.0f}")
     if g["call_wall"]:
-        fig.add_vline(x=g["call_wall"], line_color="#e74c3c", line_dash="dash",
+        fig.add_hline(y=g["call_wall"], line_color="#e74c3c", line_dash="dash",
                       annotation_text=f"Call wall {g['call_wall']:.0f}")
     if g["zero_gamma"]:
-        fig.add_vline(x=g["zero_gamma"], line_color="#f1c40f", line_dash="dot",
+        fig.add_hline(y=g["zero_gamma"], line_color="#f1c40f", line_dash="dot",
                       annotation_text=f"γflip {g['zero_gamma']:.0f}")
-    fig.update_layout(title=title, height=380, margin=dict(t=40, b=10),
-                      xaxis_title="Strike",
-                      yaxis_title="Net GEX ($M per 1-pt move)",
-                      bargap=0.1)
+    fig.update_layout(title=title, height=max(420, 14 * len(df)),
+                      margin=dict(t=40, b=10, l=10, r=10),
+                      yaxis_title="Strike",
+                      xaxis_title="Net GEX ($M per 1-pt move)",
+                      barmode="relative", bargap=0.15,
+                      legend=dict(orientation="h", y=1.02))
     return fig
 
 

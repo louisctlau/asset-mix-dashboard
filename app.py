@@ -20,7 +20,7 @@ import plotly.graph_objects as go
 import streamlit as st
 import yfinance as yf
 
-import chains
+import option_chains as chains
 import gex
 import strategy as stg
 import volsurface as vol

@@ -1,5 +1,12 @@
 # Changelog — Portfolio Lab
 
+## 2026-10-05 — Options Analytics: index options
+- Index tickers now work: SPX, RUT, NDX and VIX map to CBOE's
+  underscore-prefixed symbols (`_SPX` …). Index options are European-style
+  (cash-settled), so the Black-Scholes greeks are exact; q=0 as Yahoo
+  publishes no index dividend yield. VIX options are on futures — greeks
+  approximate.
+
 ## 2026-10-05 — GEX chart: expiry color-coding
 - The GEX chart now stacks each strike's bar by expiry (one color per
   expiry, positive gamma right / negative left, horizontal) — the bar total

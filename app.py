@@ -80,7 +80,8 @@ def load_chain_bundle(ticker: str):
     Raises RuntimeError on fetch failure or an empty chain (never cached,
     so the next visit retries fresh).
     """
-    chain, spot = chains.fetch_chain(ticker)
+    cboe_sym, _ = chains.resolve_ticker(ticker)
+    chain, spot = chains.fetch_chain(cboe_sym)
     if chain.empty or spot is None:
         raise RuntimeError(f"No chain data for {ticker}")
     return chain, spot, datetime.now(timezone.utc)
@@ -106,10 +107,12 @@ def div_yield(ticker: str) -> float:
 
     Uses trailingAnnualDividendYield (a true ratio). Note: Yahoo's
     `dividendYield` field is in percent units (e.g. 0.43 for NVDA) and
-    must NOT be used directly.
+    must NOT be used directly. Cash indices (^SPX etc.) publish no yield
+    field, so q=0 for them (negligible except on long-dated delta).
     """
     try:
-        y = yf.Ticker(ticker).info.get("trailingAnnualDividendYield") or 0.0
+        _, yahoo_sym = chains.resolve_ticker(ticker)
+        y = yf.Ticker(yahoo_sym).info.get("trailingAnnualDividendYield") or 0.0
         return min(max(float(y), 0.0), 0.25)
     except Exception:
         return 0.0
@@ -413,8 +416,8 @@ elif tool == "Options Analytics":
             rf = risk_free_rate()
         except RuntimeError:
             st.error(f"Couldn't load an option chain for {oa_ticker} — "
-                     "check the symbol (US stocks and ETFs) and try again "
-                     "in a minute.")
+                     "check the symbol (US stocks, ETFs and index options) "
+                     "and try again in a minute.")
             st.stop()
 
     exp_list = [e for e in vol.expiries(chain) if vol.dte(e) >= 1]
@@ -544,10 +547,16 @@ elif tool == "Options Analytics":
         disp.index.name = "Strike"
         st.dataframe(disp, use_container_width=True)
 
+    if oa_ticker == "VIX":
+        exercise_note = ("VIX options are on futures — greeks approximate.")
+    elif oa_ticker in ("SPX", "RUT", "NDX"):
+        exercise_note = ("Index options are European-style (cash-settled).")
+    else:
+        exercise_note = ("Listed equity options are American-style, so "
+                         "deep-ITM greeks are approximate.")
     st.caption(f"Chain as of {fetched_at:%H:%M} UTC (CBOE delayed ~15 min) · "
                f"r={rf:.1%} (3M T-bill), q={q:.2%} · Greeks via Black-Scholes "
-               "(European); listed equity options are American-style, so "
-               "deep-ITM greeks are approximate. Not investment advice.")
+               f"(European); {exercise_note} Not investment advice.")
 
 
 # ============================== CHANGELOG ==============================

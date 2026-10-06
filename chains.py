@@ -16,6 +16,21 @@ TICKERS = ["NVDA", "AMD", "MU", "AAPL", "META", "GOOG"]  # archive universe;
 # the app itself accepts any ticker with a CBOE delayed chain.
 CBOE_URL = "https://cdn.cboe.com/api/global/delayed_quotes/options/{}.json"
 
+# Index options need CBOE's underscore-prefixed symbols; Yahoo quotes the
+# cash indices with a ^ prefix. Plain tickers pass through unchanged.
+INDEX_TICKERS = {
+    "SPX": ("_SPX", "^SPX"),
+    "RUT": ("_RUT", "^RUT"),
+    "NDX": ("_NDX", "^NDX"),
+    "VIX": ("_VIX", "^VIX"),
+}
+
+
+def resolve_ticker(ticker: str) -> tuple[str, str]:
+    """Map a user-entered ticker to (CBOE symbol, Yahoo symbol)."""
+    t = ticker.strip().upper()
+    return INDEX_TICKERS.get(t, (t, t))
+
 
 def _get(url: str, tries: int = 3) -> dict:
     last = None

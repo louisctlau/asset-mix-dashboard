@@ -1,5 +1,12 @@
 # Changelog — Portfolio Lab
 
+## 2026-10-08 — GEX chart: legend fix + stat row
+- The GEX chart legend moved to the top-right inside the plot (with a dark
+  backing) — it no longer overlaps the chart title or the x-axis label.
+- New stat row under the Gamma Exposure title, matching the US Market
+  Sentiment app: Net GEX ($M/pt), Put wall (support), Call wall
+  (resistance), γflip.
+
 ## 2026-10-05 — Options Analytics: index options
 - Index tickers now work: SPX, RUT, NDX and VIX map to CBOE's
   underscore-prefixed symbols (`_SPX` …). Index options are European-style

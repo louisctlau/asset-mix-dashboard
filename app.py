@@ -494,6 +494,14 @@ elif tool == "Options Analytics":
     if gg is None:
         st.warning("No usable open interest / gamma in the chain.")
     else:
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Net GEX", f"${gg['total_net']:+.0f}M/pt")
+        m2.metric("Put wall (support)",
+                  f"{gg['put_wall']:.0f}" if gg["put_wall"] else "—")
+        m3.metric("Call wall (resistance)",
+                  f"{gg['call_wall']:.0f}" if gg["call_wall"] else "—")
+        m4.metric("γflip",
+                  f"{gg['zero_gamma']:.0f}" if gg["zero_gamma"] else "—")
         gfig = gex.gex_chart(gg, f"Net GEX by strike — {oa_ticker} ($M/pt)")
         st.plotly_chart(gfig, use_container_width=True)
         exp_str = ", ".join(pd.Timestamp(e).strftime("%b %d")

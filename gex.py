@@ -103,12 +103,13 @@ def gex_chart(g: dict, title: str) -> go.Figure:
         fig.add_hline(y=g["zero_gamma"], line_color="#f1c40f", line_dash="dot",
                       annotation_text=f"γflip {g['zero_gamma']:.0f}")
     fig.update_layout(title=title, height=max(420, 14 * len(df)),
-                      margin=dict(t=50, b=80, l=10, r=10),
+                      margin=dict(t=50, b=40, l=10, r=10),
                       yaxis_title="Strike",
                       xaxis_title="Net GEX ($M per 1-pt move)",
                       barmode="relative", bargap=0.15,
-                      legend=dict(orientation="h", yanchor="top", y=-0.10,
-                                  xanchor="center", x=0.5))
+                      legend=dict(orientation="h", yanchor="top", y=0.99,
+                                  xanchor="right", x=0.99,
+                                  bgcolor="rgba(0,0,0,0.6)"))
     return fig
 
 

@@ -6,6 +6,7 @@
 - New stat row under the Gamma Exposure title, matching the US Market
   Sentiment app: Net GEX ($M/pt), Put wall (support), Call wall
   (resistance), γflip.
+- Thin grey gridlines on the GEX chart for easier reading.
 
 ## 2026-10-05 — Options Analytics: index options
 - Index tickers now work: SPX, RUT, NDX and VIX map to CBOE's

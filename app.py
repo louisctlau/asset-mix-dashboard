@@ -34,7 +34,10 @@ DISCLAIMER = "For educational and experimental purposes only. Not investment adv
 
 
 def show_disclaimer():
-    st.caption(DISCLAIMER)
+    st.markdown(
+        '<p style="color:#ff4b4b; font-size:0.85rem;">' + DISCLAIMER + "</p>",
+        unsafe_allow_html=True,
+    )
 
 
 DEFAULT_HOLDINGS = pd.DataFrame(

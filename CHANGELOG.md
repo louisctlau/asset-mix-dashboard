@@ -8,7 +8,7 @@
   (resistance), γflip.
 - Thin grey gridlines on the GEX chart for easier reading.
 - Disclaimer under each tool's title: "For educational and experimental
-  purposes only. Not investment advice."
+  purposes only. Not investment advice." (red).
 
 ## 2026-10-05 — Options Analytics: index options
 - Index tickers now work: SPX, RUT, NDX and VIX map to CBOE's

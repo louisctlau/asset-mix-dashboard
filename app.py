@@ -30,6 +30,13 @@ st.set_page_config(page_title="Portfolio Lab", layout="wide")
 PERIODS = {"1Y": "1y", "3Y": "3y", "5Y": "5y", "10Y": "10y", "Max": "max"}
 TRADING_DAYS = 252
 
+DISCLAIMER = "For educational and experimental purposes only. Not investment advice."
+
+
+def show_disclaimer():
+    st.caption(DISCLAIMER)
+
+
 DEFAULT_HOLDINGS = pd.DataFrame(
     {"Ticker": ["SPY", "QQQ", "BND", "GLD"], "Weight %": [50.0, 10.0, 30.0, 10.0]}
 )
@@ -174,6 +181,7 @@ def mix_stats(growth: pd.Series, port_rets: pd.Series) -> dict:
 if tool == "Asset Mix":
     st.title("Asset Mix Dashboard")
     st.caption("Hypothetical portfolio — what would this asset mix have done?")
+    show_disclaimer()
 
     st.sidebar.header("Hypothetical portfolio")
     edited = st.sidebar.data_editor(
@@ -315,6 +323,7 @@ elif tool == "Strategy Tester":
     st.title("Strategy Tester")
     st.caption("Black-Scholes backtest — modeled option prices on historical "
                "stock data.")
+    show_disclaimer()
 
     st.sidebar.header("Strategy")
     ticker = st.sidebar.text_input("Ticker", value="SPY").strip().upper()
@@ -401,6 +410,7 @@ elif tool == "Options Analytics":
     st.title("Options Analytics")
     st.caption("Greeks and the volatility surface on the live CBOE delayed "
                "option chain (~15 min).")
+    show_disclaimer()
 
     st.sidebar.header("Chain")
     oa_ticker = st.sidebar.text_input("Ticker", value="NVDA").strip().upper()

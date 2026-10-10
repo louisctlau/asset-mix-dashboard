@@ -1,5 +1,27 @@
 # Changelog — Portfolio Lab
 
+## 2026-10-10 — History panels, rolling metrics, Monte Carlo, presets, glossary
+- New daily options-history builder (`scripts/build_options_history.py`):
+  reads the options-chain archive and writes `data/options_history.csv`
+  (date, ticker, net GEX, γflip, call/put walls, ATM IV, spot).
+- Options Analytics: IV percentile panel — current ATM IV ranked against its
+  own trailing history, with a history line chart (hides silently when the
+  ticker has fewer than 5 history points).
+- Options Analytics: GEX history chart — trailing net GEX and γflip from the
+  daily archive.
+- Asset Mix: rolling 1-year Sharpe, volatility and max drawdown charts
+  (portfolio + faint benchmark).
+- Asset Mix: Monte Carlo fan chart — 2,000 simulated 1-year paths from the
+  portfolio's own monthly returns, with 10th/50th/90th percentile bands
+  (buy-and-hold assumed within paths; rebalance not modeled).
+- Strategy Tester: side-by-side comparison table running all 7 strategies on
+  the same inputs (total return, CAGR, Sharpe, max DD, win rate, # trades).
+- Asset Mix sidebar: one-click presets (60/40, All Equity, Conservative,
+  Golden Butterfly, Permanent Portfolio) plus JSON download/upload for
+  custom mixes.
+- "What am I looking at?" glossary expanders in all three tools.
+- CSV downloads: growth series, strategy comparison table, trade log.
+
 ## 2026-10-08 — GEX chart: legend fix + stat row
 - The GEX chart legend moved to the top-right inside the plot (with a dark
   backing) — it no longer overlaps the chart title or the x-axis label.

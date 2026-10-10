@@ -24,6 +24,11 @@ import option_chains as chains
 import gex
 import strategy as stg
 import volsurface as vol
+import glossary as gl
+import iv_history as ivh
+import montecarlo as mc
+import presets
+import strategy_compare as scmp
 
 st.set_page_config(page_title="Portfolio Lab", layout="wide")
 
@@ -185,8 +190,33 @@ if tool == "Asset Mix":
     st.title("Asset Mix Dashboard")
     st.caption("Hypothetical portfolio — what would this asset mix have done?")
     show_disclaimer()
+    gl.show_glossary("Asset Mix")
 
     st.sidebar.header("Hypothetical portfolio")
+    with st.sidebar.expander("Presets & saved mixes", expanded=False):
+        cols = st.columns(3)
+        for i, name in enumerate(presets.PRESETS):
+            if cols[i % 3].button(name, key=f"preset_{i}",
+                                  use_container_width=True):
+                st.session_state["holdings"] = presets.preset_frame(name)
+        up = st.file_uploader("Load config (JSON)", type="json",
+                              key="cfg_upload")
+        if up is not None and st.session_state.get("_cfg_loaded") != up.name:
+            try:
+                cfg = presets.config_from_json(
+                    up.read().decode("utf-8"))
+                st.session_state["holdings"] = cfg["holdings"]
+                st.session_state["capital"] = cfg["capital"]
+                for k, allowed in (
+                        ("lookback", list(PERIODS)),
+                        ("rebalance", ["Monthly", "Quarterly", "Annual",
+                                       "None"]),
+                        ("benchmark", ["SPY", "60/40 (SPY/BND)", "None"])):
+                    if cfg[k] in allowed:
+                        st.session_state[k] = cfg[k]
+                st.session_state["_cfg_loaded"] = up.name
+            except Exception:
+                st.warning("Could not read that config file.")
     edited = st.sidebar.data_editor(
         DEFAULT_HOLDINGS, num_rows="dynamic", use_container_width=True,
         column_config={
@@ -197,12 +227,15 @@ if tool == "Asset Mix":
         key="holdings",
     )
     capital = st.sidebar.number_input("Initial capital ($)", min_value=100,
-                                      value=10000, step=1000)
-    lookback = st.sidebar.selectbox("Lookback", list(PERIODS), index=2)
+                                      value=10000, step=1000, key="capital")
+    lookback = st.sidebar.selectbox("Lookback", list(PERIODS), index=2,
+                                    key="lookback")
     rebalance = st.sidebar.selectbox(
-        "Rebalance", ["Monthly", "Quarterly", "Annual", "None"], index=1)
+        "Rebalance", ["Monthly", "Quarterly", "Annual", "None"], index=1,
+        key="rebalance")
     benchmark = st.sidebar.selectbox(
-        "Benchmark", ["SPY", "60/40 (SPY/BND)", "None"], index=0)
+        "Benchmark", ["SPY", "60/40 (SPY/BND)", "None"], index=0,
+        key="benchmark")
 
     hold = edited.copy()
     hold["Ticker"] = hold["Ticker"].astype(str).str.strip().str.upper()
@@ -219,6 +252,11 @@ if tool == "Asset Mix":
         st.sidebar.caption(
             f"Weights sum to {weights.sum():.1f}% — normalized to 100%.")
     weights = weights / weights.sum()
+    st.sidebar.download_button(
+        "Download config (JSON)",
+        presets.config_to_json(hold, capital, lookback, rebalance,
+                               benchmark),
+        file_name="portfolio_config.json", mime="application/json")
 
     needed = set(tickers)
     if benchmark == "60/40 (SPY/BND)":
@@ -318,6 +356,90 @@ if tool == "Asset Mix":
         st.caption(f"Rebalancing: {rebalance.lower()} · "
                    f"{growth.index[0].date()} → {growth.index[-1].date()}")
 
+    st.subheader("Rolling 1-year risk metrics")
+    st.caption("Each stat recomputed on a trailing 252-trading-day window.")
+    roll = port_rets.rolling(TRADING_DAYS)
+    roll_sharpe = roll.mean() / roll.std() * np.sqrt(TRADING_DAYS)
+    roll_vol = roll.std() * np.sqrt(TRADING_DAYS)
+    roll_dd = growth.rolling(TRADING_DAYS).apply(
+        lambda w: float((w / w.cummax() - 1).min()), raw=False)
+    bench_roll = {}
+    for name, bs in bench_series.items():
+        br = bs.pct_change().dropna()
+        broll = br.rolling(TRADING_DAYS)
+        bg = bs
+        bench_roll[name] = (
+            broll.mean() / broll.std() * np.sqrt(TRADING_DAYS),
+            broll.std() * np.sqrt(TRADING_DAYS),
+            bg.rolling(TRADING_DAYS).apply(
+                lambda w: float((w / w.cummax() - 1).min()), raw=False),
+        )
+    for title, pser, bidx, fmt in (
+            ("Sharpe", roll_sharpe, 0, ".2f"),
+            ("Volatility (ann.)", roll_vol, 1, ".1%"),
+            ("Max drawdown", roll_dd, 2, ".1%")):
+        rfig = go.Figure()
+        rfig.add_trace(go.Scatter(x=pser.index, y=pser.values,
+                                  name="Portfolio", line=dict(width=2.5)))
+        for name, bro in bench_roll.items():
+            rfig.add_trace(go.Scatter(x=bro[bidx].index, y=bro[bidx].values,
+                                      name=name, line=dict(dash="dash",
+                                                           width=1.2,
+                                                           color="rgba(160,160,160,0.7)")))
+        rfig.update_layout(title=title, yaxis_tickformat=fmt, height=260,
+                           margin=dict(t=40, b=10, l=10, r=10),
+                           legend=dict(orientation="h", y=1.05))
+        st.plotly_chart(rfig, use_container_width=True)
+
+    st.subheader("Monte Carlo — 1 year forward")
+    monthly = port_rets.resample("ME").apply(lambda x: (1 + x).prod() - 1)
+    if len(monthly) < 12:
+        st.caption("Not enough history for a 12-month simulation — "
+                   "pick a longer lookback.")
+    else:
+        paths = mc.simulate(monthly)
+        b = mc.bands(paths)
+        mstats = mc.ending_stats(paths, capital)
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Median outcome", f"${mstats['p50']:,.0f}")
+        m2.metric("10th percentile", f"${mstats['p10']:,.0f}")
+        m3.metric("90th percentile", f"${mstats['p90']:,.0f}")
+        m4.metric("Chance of profit", f"{mstats['prob_profit']:.0%}")
+        mfig = go.Figure()
+        mfig.add_trace(go.Scatter(x=b.index, y=b["p90"] * capital,
+                                  line=dict(width=0), showlegend=False,
+                                  hoverinfo="skip"))
+        mfig.add_trace(go.Scatter(x=b.index, y=b["p10"] * capital,
+                                  line=dict(width=0), showlegend=False,
+                                  hoverinfo="skip",
+                                  fill="tonexty",
+                                  fillcolor="rgba(99,110,250,0.20)"))
+        sample = paths.sample(min(20, paths.shape[1]), axis=1, random_state=7)
+        for col in sample.columns:
+            mfig.add_trace(go.Scatter(x=sample.index,
+                                      y=sample[col] * capital,
+                                      line=dict(width=0.7,
+                                                color="rgba(150,150,150,0.35)"),
+                                      showlegend=False, hoverinfo="skip"))
+        mfig.add_trace(go.Scatter(x=b.index, y=b["p50"] * capital,
+                                  name="Median path",
+                                  line=dict(width=2.5, color="#636EFA")))
+        mfig.update_layout(yaxis_title="$", xaxis_title="Months ahead",
+                           height=360, margin=dict(t=10, b=10, l=10, r=10),
+                           legend=dict(orientation="h", y=1.05))
+        st.plotly_chart(mfig, use_container_width=True)
+        st.caption("2,000 paths; monthly steps resampled with replacement "
+                   "from this portfolio's own history. Buy-and-hold assumed "
+                   "within each path (rebalance not modeled); no fees, "
+                   "taxes, or contributions. A planning range, not a "
+                   "prediction.")
+
+    gdf = pd.DataFrame({"Portfolio": growth})
+    for name, bs in bench_series.items():
+        gdf[name] = bs
+    st.download_button("Download growth series (CSV)", gdf.to_csv(),
+                       "growth_series.csv", "text/csv")
+
     st.caption("Data: Yahoo Finance adjusted closes (dividends reinvested), "
                "daily. Hypothetical backtest — not investment advice.")
 
@@ -327,6 +449,7 @@ elif tool == "Strategy Tester":
     st.caption("Black-Scholes backtest — modeled option prices on historical "
                "stock data.")
     show_disclaimer()
+    gl.show_glossary("Strategy Tester")
 
     st.sidebar.header("Strategy")
     ticker = st.sidebar.text_input("Ticker", value="SPY").strip().upper()
@@ -393,12 +516,31 @@ elif tool == "Strategy Tester":
                        legend=dict(orientation="h", y=1.05))
     st.plotly_chart(efig, use_container_width=True)
 
+    st.subheader("All strategies — side by side")
+    st.caption("Same ticker, lookback, expiry and volatility settings for "
+               "every strategy.")
+    with st.spinner("Running all strategies…"):
+        comp = scmp.compare_all(prices, int(dte), rf, mode, fixed_iv)
+    if not comp.empty:
+        disp = comp.copy()
+        for pc in ["Total return", "CAGR", "Max drawdown", "Win rate"]:
+            disp[pc] = (disp[pc] * 100).round(1).astype(str) + "%"
+        disp["Sharpe"] = disp["Sharpe"].round(2)
+        st.dataframe(disp, use_container_width=True)
+        st.download_button("Download comparison (CSV)",
+                           comp.to_csv(index=False),
+                           "strategy_comparison.csv", "text/csv")
+
     with st.expander(f"Trade log ({len(trades)} trades)"):
         show = trades.copy()
         for col in ["S", "S_T", "Net premium", "P&L", "Capital"]:
             show[col] = show[col].round(2)
         show["IV"] = (show["IV"] * 100).round(1).astype(str) + "%"
         st.dataframe(show, use_container_width=True)
+        st.download_button(
+            "Download trade log (CSV)", trades.to_csv(index=False),
+            f"trade_log_{ticker}_{strat_name}.csv".replace(" ", "_"),
+            "text/csv")
 
     st.caption(
         "Modeled with Black-Scholes (European options, "
@@ -414,6 +556,7 @@ elif tool == "Options Analytics":
     st.caption("Greeks and the volatility surface on the live CBOE delayed "
                "option chain (~15 min).")
     show_disclaimer()
+    gl.show_glossary("Options Analytics")
 
     st.sidebar.header("Chain")
     oa_ticker = st.sidebar.text_input("Ticker", value="NVDA").strip().upper()
@@ -496,6 +639,28 @@ elif tool == "Options Analytics":
     st.caption("Risk reversal < 0: downside puts pricier than upside calls — "
                "the usual equity put skew. Butterfly: smile convexity.")
 
+    ivp = ivh.iv_percentile_row(oa_ticker)
+    if ivp is not None:
+        st.subheader("IV percentile — trailing history")
+        i1, i2 = st.columns(2)
+        i1.metric("Current ATM IV", f"{ivp['current_iv']:.1%}")
+        i2.metric("IV percentile", f"{ivp['percentile']:.0f}")
+        st.progress(min(max(ivp["percentile"] / 100.0, 0.0), 1.0),
+                    text=f"{ivp['percentile']:.0f} of 100 — "
+                         f"{'rich' if ivp['percentile'] >= 70 else 'cheap' if ivp['percentile'] <= 30 else 'mid-range'} vs history")
+        pfig = go.Figure()
+        pfig.add_trace(go.Scatter(x=ivp["series"]["date"],
+                                  y=ivp["series"]["atm_iv"] * 100,
+                                  mode="lines+markers", name="ATM IV",
+                                  line=dict(width=2.5)))
+        pfig.update_layout(yaxis_title="IV %", height=260,
+                           margin=dict(t=10, b=10, l=10, r=10),
+                           showlegend=False)
+        st.plotly_chart(pfig, use_container_width=True)
+        st.caption(f"ATM IV vs its own history — {ivp['n']} daily chain "
+                   f"snapshots, as of {ivp['as_of']}. 0 = cheapest on "
+                   f"record, 100 = richest.")
+
     st.subheader("Gamma exposure (GEX)")
     st.caption("Dealer positioning: long calls / short puts. Positive GEX "
                "dampens moves (pinning); negative GEX amplifies them.")
@@ -520,6 +685,31 @@ elif tool == "Options Analytics":
         exp_str = ", ".join(pd.Timestamp(e).strftime("%b %d")
                             for e in gg["expiries"])
         st.caption(gex.gex_read(gg) + f" Nearest 3 expiries: {exp_str}.")
+
+    gh = ivh.gex_history_rows(oa_ticker)
+    if gh is not None:
+        st.subheader("GEX history")
+        hfig = go.Figure()
+        hfig.add_trace(go.Scatter(x=gh["gex"]["date"],
+                                  y=gh["gex"]["net_gex_m"],
+                                  name="Net GEX ($M/pt)",
+                                  line=dict(width=2.5)))
+        hfig.add_hline(y=0, line_dash="dash", line_color="gray")
+        if not gh["flip"].empty:
+            hfig.add_trace(go.Scatter(x=gh["flip"]["date"],
+                                      y=gh["flip"]["gamma_flip"],
+                                      name="γflip", yaxis="y2",
+                                      line=dict(width=2, dash="dot",
+                                                color="#f1c40f")))
+            hfig.update_layout(yaxis2=dict(title="γflip strike",
+                                           overlaying="y", side="right",
+                                           showgrid=False))
+        hfig.update_layout(yaxis_title="Net GEX ($M/pt)", height=300,
+                           margin=dict(t=10, b=10, l=10, r=10),
+                           legend=dict(orientation="h", y=1.05))
+        st.plotly_chart(hfig, use_container_width=True)
+        st.caption(f"Daily chain snapshots, as of {gh['as_of']}. Net GEX "
+                   f"from the nearest 3 expiries each day.")
 
     st.subheader("Greeks by strike")
     gname = st.selectbox("Greek", ["Delta", "Gamma", "Theta", "Vanna", "Charm"],

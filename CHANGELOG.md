@@ -1,5 +1,11 @@
 # Changelog — Portfolio Lab
 
+## 2026-10-18 — Strategy Tester: blank CAGR now reads "n/a" + footnote
+- In the side-by-side comparison table, a strategy whose cumulative losses
+  exceed its first-trade capital (equity curve crosses zero) made the CAGR
+  cell blank. It now reads "n/a", with a caption explaining that CAGR is
+  undefined in that case.
+
 ## 2026-10-10 — History panels, rolling metrics, Monte Carlo, presets, glossary
 - New daily options-history builder (`scripts/build_options_history.py`):
   reads the options-chain archive and writes `data/options_history.csv`

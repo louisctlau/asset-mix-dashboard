@@ -525,8 +525,15 @@ elif tool == "Strategy Tester":
         disp = comp.copy()
         for pc in ["Total return", "CAGR", "Max drawdown", "Win rate"]:
             disp[pc] = (disp[pc] * 100).round(1).astype(str) + "%"
+        # CAGR is undefined once cumulative losses exceed first-trade
+        # capital (equity curve crosses zero) — show "n/a", not a blank.
+        disp["CAGR"] = disp["CAGR"].where(comp["CAGR"].notna(), "n/a")
         disp["Sharpe"] = disp["Sharpe"].round(2)
         st.dataframe(disp, use_container_width=True)
+        if comp["CAGR"].isna().any():
+            st.caption("n/a — CAGR is undefined when cumulative losses "
+                       "exceed first-trade capital (the equity curve "
+                       "crosses zero).")
         st.download_button("Download comparison (CSV)",
                            comp.to_csv(index=False),
                            "strategy_comparison.csv", "text/csv")

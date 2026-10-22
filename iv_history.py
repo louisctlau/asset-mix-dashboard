@@ -9,6 +9,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 HIST_CSV = Path(__file__).resolve().parent / "data" / "options_history.csv"
@@ -38,11 +39,16 @@ def ticker_history(ticker: str) -> pd.DataFrame | None:
     return sub.reset_index(drop=True)
 
 
-def iv_percentile_row(ticker: str) -> dict | None:
+def iv_percentile_row(ticker: str,
+                      current_iv: float | None = None) -> dict | None:
     """Current ATM IV + its percentile rank vs trailing history.
 
-    Percentile = fraction of history at-or-below current, 0-100.
-    Returns None when the panel should stay hidden.
+    Percentile = fraction of history at-or-below current, 0-100. When the
+    caller passes the LIVE ATM IV (from the freshly fetched chain) it is
+    ranked against the archived daily series; otherwise the latest
+    archived value ranks itself (legacy behaviour). Returns None when the
+    panel should stay hidden. Extra keys: "start" (first history date),
+    "live" (True when current_iv was supplied by the caller).
     """
     sub = ticker_history(ticker)
     if sub is None:
@@ -50,13 +56,16 @@ def iv_percentile_row(ticker: str) -> dict | None:
     ivs = sub["atm_iv"].dropna()
     if len(ivs) < MIN_POINTS:
         return None
-    cur = float(ivs.iloc[-1])
+    live = current_iv is not None and np.isfinite(current_iv)
+    cur = float(current_iv) if live else float(ivs.iloc[-1])
     pct = float((ivs <= cur).mean() * 100.0)
     return {
         "current_iv": cur,
         "percentile": pct,
         "n": len(ivs),
         "as_of": sub["date"].iloc[-1].date().isoformat(),
+        "start": sub["date"].iloc[0].date().isoformat(),
+        "live": bool(live),
         "series": sub[["date", "atm_iv"]],
     }
 

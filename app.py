@@ -10,7 +10,7 @@ Options Analytics: greeks (delta, gamma, theta, vanna, charm) and the
 volatility surface (smile, skew, term structure) on the live CBOE delayed
 option chain.
 """
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -29,6 +29,8 @@ import iv_history as ivh
 import montecarlo as mc
 import presets
 import strategy_compare as scmp
+import lookthrough as lt
+import stress
 
 st.set_page_config(page_title="Portfolio Lab", layout="wide")
 
@@ -36,6 +38,8 @@ PERIODS = {"1Y": "1y", "3Y": "3y", "5Y": "5y", "10Y": "10y", "Max": "max"}
 TRADING_DAYS = 252
 
 DISCLAIMER = "For educational and experimental purposes only. Not investment advice."
+
+SHARE_BASE = "https://asset-mix-dashboard-yq6uafox6qw4efjtqrnjat.streamlit.app"
 
 
 def show_disclaimer():
@@ -133,6 +137,39 @@ def div_yield(ticker: str) -> float:
         return 0.0
 
 
+@st.cache_data(ttl=86400, show_spinner=False)
+def load_lookthrough(ticker: str) -> dict:
+    """Underlying holdings + sector weights for one ticker (24h cache)."""
+    return lt.fetch_ticker_info(ticker)
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def next_earnings(ticker: str):
+    """Next earnings date (datetime.date) via Yahoo calendar, or None.
+
+    Never raises. The date may be Yahoo's estimate for an unconfirmed
+    quarter — callers must label it as such.
+    """
+    try:
+        _, yahoo_sym = chains.resolve_ticker(ticker)
+        cal = yf.Ticker(yahoo_sym).calendar
+        dates = []
+        if isinstance(cal, dict):
+            dates = list(cal.get("Earnings Date") or [])
+        elif cal is not None and hasattr(cal, "loc"):
+            try:
+                dates = list(cal.loc["Earnings Date"])
+            except Exception:
+                dates = []
+        for d in dates:
+            dd = d.date() if hasattr(d, "date") else d
+            if isinstance(dd, date):
+                return dd
+    except Exception:
+        pass
+    return None
+
+
 def simulate(prices: pd.DataFrame, target_w: pd.Series,
              rebalance: str) -> tuple[pd.Series, pd.DataFrame]:
     """Backtest a target-weight portfolio.
@@ -192,20 +229,63 @@ if tool == "Asset Mix":
     show_disclaimer()
     gl.show_glossary("Asset Mix")
 
+    # Share-link prefill (once per session, before the widgets below are
+    # created): ?tickers=SPY:50,QQQ:10&capital=10000&lookback=5Y&...
+    if not st.session_state.get("_qp_loaded"):
+        st.session_state["_qp_loaded"] = True
+        qp = st.query_params
+        if qp.get("tickers") and "_pending_holdings" not in st.session_state:
+            try:
+                pairs = [p.split(":") for p in qp["tickers"].split(",")
+                         if ":" in p]
+                frame = pd.DataFrame(
+                    {"Ticker": [a.strip().upper() for a, _ in pairs],
+                     "Weight %": [float(b) for _, b in pairs]})
+                frame = frame[(frame["Ticker"] != "")
+                              & (frame["Weight %"] > 0)]
+                if not frame.empty:
+                    st.session_state["_pending_holdings"] = frame
+            except Exception:
+                pass
+        for _key, _allowed in (
+                ("lookback", list(PERIODS)),
+                ("rebalance", ["Monthly", "Quarterly", "Annual", "None"]),
+                ("benchmark", ["SPY", "60/40 (SPY/BND)", "None"])):
+            if qp.get(_key) in _allowed and _key not in st.session_state:
+                st.session_state[_key] = qp[_key]
+        if qp.get("capital") and "capital" not in st.session_state:
+            try:
+                _cap = int(float(qp["capital"]))
+                if _cap >= 100:
+                    st.session_state["capital"] = _cap
+            except Exception:
+                pass
+
+    def _set_holdings(frame):
+        """Replace the editor's contents.
+
+        data_editor state is read-only via session_state assignment, so
+        the editor is re-created under a fresh key (epoch bump) seeded
+        with this frame as its data argument.
+        """
+        st.session_state["_pending_holdings"] = frame
+        st.session_state["_editor_epoch"] = (
+            st.session_state.get("_editor_epoch", 0) + 1)
+
     st.sidebar.header("Hypothetical portfolio")
     with st.sidebar.expander("Presets & saved mixes", expanded=False):
         cols = st.columns(3)
         for i, name in enumerate(presets.PRESETS):
             if cols[i % 3].button(name, key=f"preset_{i}",
                                   use_container_width=True):
-                st.session_state["holdings"] = presets.preset_frame(name)
+                _set_holdings(presets.preset_frame(name))
         up = st.file_uploader("Load config (JSON)", type="json",
                               key="cfg_upload")
         if up is not None and st.session_state.get("_cfg_loaded") != up.name:
             try:
                 cfg = presets.config_from_json(
                     up.read().decode("utf-8"))
-                st.session_state["holdings"] = cfg["holdings"]
+                _set_holdings(cfg["holdings"])
                 st.session_state["capital"] = cfg["capital"]
                 for k, allowed in (
                         ("lookback", list(PERIODS)),
@@ -217,15 +297,46 @@ if tool == "Asset Mix":
                 st.session_state["_cfg_loaded"] = up.name
             except Exception:
                 st.warning("Could not read that config file.")
+    with st.sidebar.expander("Compare mixes (slots A / B / C)",
+                             expanded=False):
+        st.caption("Save the mix currently in the editor to a slot, then "
+                   "compare slots at the bottom of the page.")
+        _slots = st.session_state.setdefault("mix_slots", {})
+        for _slot in "ABC":
+            if st.button(f"Save current mix → {_slot}",
+                         key=f"save_slot_{_slot}",
+                         use_container_width=True):
+                _raw = st.session_state.get("_last_edited",
+                                            DEFAULT_HOLDINGS)
+                _cf = _raw.copy()
+                _cf["Ticker"] = (_cf["Ticker"].astype(str).str.strip()
+                                 .str.upper())
+                _cf = _cf[(_cf["Ticker"] != "") & (_cf["Ticker"] != "NAN")]
+                _cf["Weight %"] = pd.to_numeric(
+                    _cf["Weight %"], errors="coerce").fillna(0)
+                _cf = _cf[_cf["Weight %"] > 0]
+                if not _cf.empty:
+                    _slots[_slot] = {
+                        "holdings": _cf.reset_index(drop=True),
+                        "label": " + ".join(
+                            f"{t} {w:g}%" for t, w in
+                            zip(_cf["Ticker"], _cf["Weight %"])),
+                    }
+                    st.session_state["mix_slots"] = _slots
+            _cur = _slots.get(_slot)
+            st.caption(f"{_slot}: {_cur.get('label') if _cur else 'empty'}")
+    _pending = st.session_state.get("_pending_holdings")
     edited = st.sidebar.data_editor(
-        DEFAULT_HOLDINGS, num_rows="dynamic", use_container_width=True,
+        _pending if _pending is not None else DEFAULT_HOLDINGS,
+        num_rows="dynamic", use_container_width=True,
         column_config={
             "Ticker": st.column_config.TextColumn("Ticker", max_chars=10),
             "Weight %": st.column_config.NumberColumn("Weight %", min_value=0,
                                                       max_value=100, step=5),
         },
-        key="holdings",
+        key=f"holdings_e{st.session_state.get('_editor_epoch', 0)}",
     )
+    st.session_state["_last_edited"] = edited.copy()
     capital = st.sidebar.number_input("Initial capital ($)", min_value=100,
                                       value=10000, step=1000, key="capital")
     lookback = st.sidebar.selectbox("Lookback", list(PERIODS), index=2,
@@ -257,6 +368,20 @@ if tool == "Asset Mix":
         presets.config_to_json(hold, capital, lookback, rebalance,
                                benchmark),
         file_name="portfolio_config.json", mime="application/json")
+
+    _tickers_q = ",".join(f"{t}:{w:g}" for t, w in
+                          zip(hold["Ticker"], hold["Weight %"]))
+    _new_qp = {"tickers": _tickers_q, "capital": str(capital),
+               "lookback": lookback, "rebalance": rebalance,
+               "benchmark": benchmark}
+    if any(st.query_params.get(k) != v for k, v in _new_qp.items()):
+        for _k, _v in _new_qp.items():
+            st.query_params[_k] = _v
+    _share_url = (f"{SHARE_BASE}/?tickers={_tickers_q}"
+                  f"&capital={capital}&lookback={lookback}"
+                  f"&rebalance={rebalance}&benchmark={benchmark}")
+    st.sidebar.caption("Share link (encodes this mix):")
+    st.sidebar.code(_share_url, language=None)
 
     needed = set(tickers)
     if benchmark == "60/40 (SPY/BND)":
@@ -307,6 +432,18 @@ if tool == "Asset Mix":
     c3.metric("Worst year", f"{s['Worst year']:.1%}")
     c4.metric("Holdings", f"{len(weights)}")
 
+    if rebalance != "None":
+        _nr_rets, _ = simulate(prices, weights, "None")
+        _nr_growth = (1 + _nr_rets).cumprod() * capital
+        _ns = mix_stats(_nr_growth, _nr_rets)
+        st.info(
+            f"**Rebalancing check** — {rebalance.lower()} rebalancing vs "
+            f"never rebalancing, same mix and window: CAGR "
+            f"{s['CAGR']:.1%} vs {_ns['CAGR']:.1%} "
+            f"({s['CAGR'] - _ns['CAGR']:+.1%}), total return "
+            f"{s['Total return']:.1%} vs {_ns['Total return']:.1%} "
+            f"({s['Total return'] - _ns['Total return']:+.1%}).")
+
     left, right = st.columns([1, 2])
     with left:
         st.subheader("Target allocation")
@@ -355,6 +492,53 @@ if tool == "Asset Mix":
                      use_container_width=True)
         st.caption(f"Rebalancing: {rebalance.lower()} · "
                    f"{growth.index[0].date()} → {growth.index[-1].date()}")
+
+    st.subheader("Look-through exposure")
+    st.caption("What the mix actually owns: each fund's disclosed top "
+               "holdings aggregated through the portfolio weights (Yahoo "
+               "Finance fund data, cached 24h). Single stocks look "
+               "through to themselves.")
+    with st.spinner("Fetching fund holdings…"):
+        _infos = {t: load_lookthrough(t) for t in weights.index}
+    _agg = lt.aggregate(weights, _infos)
+    _cov = [f"Holdings data covers {_agg.get('coverage', 0):.0%} of "
+            f"portfolio weight."]
+    if _agg.get("uncovered"):
+        _cov.append("No holdings data for: "
+                    + ", ".join(_agg["uncovered"]) + ".")
+    if _agg.get("unattributed", 0) > 0.005:
+        _cov.append(f"A further {_agg['unattributed']:.0%} of portfolio "
+                    "weight sits inside funds beyond their top-10 "
+                    "disclosures (other holdings and cash) and is not "
+                    "attributed to a named underlying.")
+    st.caption(" ".join(_cov))
+    _lh, _rh = st.columns(2)
+    with _lh:
+        st.markdown("**Top underlying holdings**")
+        _h = _agg.get("holdings")
+        if _h is not None and not _h.empty:
+            _hd = _h.head(15).copy()
+            _hd["Portfolio %"] = (_hd["weight"] * 100).round(2)
+            st.dataframe(_hd[["symbol", "name", "Portfolio %"]].rename(
+                columns={"symbol": "Underlying", "name": "Name"}),
+                use_container_width=True, hide_index=True)
+        else:
+            st.caption("No holdings data available for this mix.")
+    with _rh:
+        st.markdown("**Sector breakdown**")
+        _sec = _agg.get("sectors")
+        if _sec is not None and not _sec.empty:
+            _sd = _sec.copy()
+            _sd["Portfolio %"] = (_sd["weight"] * 100).round(1)
+            _sfig = px.bar(_sd, x="Portfolio %", y="sector",
+                           orientation="h")
+            _sfig.update_layout(height=320, margin=dict(t=10, b=10, l=10,
+                                                        r=10),
+                                yaxis_title="", xaxis_title="% of portfolio")
+            _sfig.update_traces(marker_color="#636EFA")
+            st.plotly_chart(_sfig, use_container_width=True)
+        else:
+            st.caption("No sector data available for this mix.")
 
     st.subheader("Rolling 1-year risk metrics")
     st.caption("Each stat recomputed on a trailing 252-trading-day window.")
@@ -434,11 +618,162 @@ if tool == "Asset Mix":
                    "taxes, or contributions. A planning range, not a "
                    "prediction.")
 
+    st.subheader("Stress replay — named regimes")
+    st.caption("This mix, at its target weights with the selected "
+               "rebalance setting, through fixed historical windows — "
+               "computed on full available price history, independent of "
+               "the lookback above.")
+    try:
+        _maxcloses = load_closes(tuple(sorted(weights.index)), "max")
+    except RuntimeError:
+        _maxcloses = None
+    if _maxcloses is None:
+        st.caption("Full-history data is unavailable right now — stress "
+                   "replay skipped.")
+    else:
+        with st.spinner("Replaying stress episodes…"):
+            _eps = stress.episode_results(_maxcloses, weights, rebalance,
+                                          simulate)
+        _erows = []
+        for _r in _eps:
+            _erows.append({
+                "Episode": _r.get("name"),
+                "Window": (f"{_r.get('start').date()} → "
+                           f"{_r.get('end').date()}"),
+                "Mix return": (f"{_r['return']:.1%}" if _r.get("ok")
+                               else "—"),
+                "Max drawdown in window": (f"{_r['max_dd']:.1%}"
+                                           if _r.get("ok") else "—"),
+                "Recovery to pre-window peak": (
+                    f"{_r['recovery_days']} days "
+                    f"({_r['recovery_date']})"
+                    if _r.get("recovery_days") is not None else "—"),
+            })
+        st.dataframe(pd.DataFrame(_erows), use_container_width=True,
+                     hide_index=True)
+        for _r in _eps:
+            if _r.get("note"):
+                st.caption(f"{_r.get('name')}: {_r['note']}")
+        st.caption("Recovery is shown for the COVID episode only: "
+                   "calendar days from the window's opening peak until "
+                   "the mix first regained that level.")
+
+    _slots_now = {k: v for k, v in
+                  (st.session_state.get("mix_slots") or {}).items() if v}
+    if _slots_now:
+        st.subheader("Compare saved mixes")
+        st.caption("Same lookback, capital, rebalance and benchmark for "
+                   "every mix. Best value in each metric row is "
+                   "highlighted.")
+        _picks = [k for k in "ABC" if k in _slots_now]
+        # Key changes whenever the filled-slot set changes, so a newly
+        # saved mix is included by default instead of the widget keeping
+        # its previous selection.
+        _chosen = st.multiselect(
+            "Mixes to compare", _picks, default=_picks,
+            key=f"compare_pick_{''.join(_picks)}")
+        if not _chosen:
+            st.caption("Pick at least one saved mix.")
+        else:
+            _union = sorted({t for k in _chosen
+                             for t in _slots_now[k]["holdings"]["Ticker"]})
+            _need = set(_union)
+            if benchmark == "60/40 (SPY/BND)":
+                _need |= {"SPY", "BND"}
+            elif benchmark == "SPY":
+                _need.add("SPY")
+            try:
+                _ccloses = load_closes(tuple(sorted(_need)),
+                                       PERIODS[lookback])
+            except RuntimeError:
+                _ccloses = None
+            if _ccloses is None:
+                st.caption("Market data is unavailable for the "
+                           "comparison right now.")
+            else:
+                _ccloses = _ccloses.dropna()
+                _curves, _mrows = {}, {}
+                for _k in _chosen:
+                    _hf = _slots_now[_k]["holdings"]
+                    _w = pd.Series(_hf["Weight %"].values,
+                                   index=_hf["Ticker"], dtype=float)
+                    _w = _w / _w.sum()
+                    _rets_k, _ = simulate(_ccloses[list(_w.index)], _w,
+                                          rebalance)
+                    _g_k = (1 + _rets_k).cumprod() * capital
+                    _lbl = _slots_now[_k].get("label", _k)
+                    _disp = (f"{_k} — {_lbl}" if len(_lbl) <= 56
+                             else f"{_k} — {_lbl[:53]}…")
+                    _curves[_disp] = _g_k
+                    _mrows[_disp] = mix_stats(_g_k, _rets_k)
+                _cfig = go.Figure()
+                for _nm, _g_k in _curves.items():
+                    _cfig.add_trace(go.Scatter(
+                        x=_g_k.index, y=_g_k.values, name=_nm,
+                        line=dict(width=2.2)))
+                for _nm, _bs in bench_series.items():
+                    _cfig.add_trace(go.Scatter(
+                        x=_bs.index, y=_bs.values, name=_nm,
+                        line=dict(dash="dash")))
+                _cfig.update_layout(
+                    yaxis_title="$", height=340,
+                    margin=dict(t=10, b=10, l=10, r=10),
+                    legend=dict(orientation="h", y=1.05))
+                st.plotly_chart(_cfig, use_container_width=True)
+                _morder = ["Total return", "CAGR", "Volatility (ann.)",
+                           "Sharpe (rf=0)", "Max drawdown", "Best year",
+                           "Worst year"]
+                _higher = {"Total return": True, "CAGR": True,
+                           "Volatility (ann.)": False, "Sharpe (rf=0)": True,
+                           "Max drawdown": True, "Best year": True,
+                           "Worst year": True}
+                _mdf = pd.DataFrame(_mrows).reindex(_morder)
+                _dispdf = pd.DataFrame(index=_mdf.index,
+                                       columns=_mdf.columns, dtype=object)
+                for _idx in _mdf.index:
+                    if _idx == "Sharpe (rf=0)":
+                        _dispdf.loc[_idx] = _mdf.loc[_idx].map(
+                            lambda v: f"{v:.2f}" if pd.notna(v) else "—")
+                    else:
+                        _dispdf.loc[_idx] = _mdf.loc[_idx].map(
+                            lambda v: f"{v:.1%}" if pd.notna(v) else "—")
+                _styles = pd.DataFrame("", index=_mdf.index,
+                                       columns=_mdf.columns)
+                for _idx in _mdf.index:
+                    _vals = _mdf.loc[_idx].dropna()
+                    if len(_vals) >= 2:
+                        _win = (_vals.max() if _higher.get(_idx, True)
+                                else _vals.min())
+                        _styles.loc[_idx] = [
+                            "background-color: rgba(46, 160, 67, 0.35)"
+                            if v == _win else "" for v in _mdf.loc[_idx]]
+                st.dataframe(_dispdf.style.apply(lambda _d: _styles,
+                                                 axis=None),
+                             use_container_width=True)
+
     gdf = pd.DataFrame({"Portfolio": growth})
     for name, bs in bench_series.items():
         gdf[name] = bs
-    st.download_button("Download growth series (CSV)", gdf.to_csv(),
-                       "growth_series.csv", "text/csv")
+    _met_rows = [{"Item": "Setting — capital", "Value": capital},
+                 {"Item": "Setting — lookback", "Value": lookback},
+                 {"Item": "Setting — rebalance", "Value": rebalance},
+                 {"Item": "Setting — benchmark", "Value": benchmark},
+                 {"Item": "Period", "Value": (
+                     f"{growth.index[0].date()} to "
+                     f"{growth.index[-1].date()}")}]
+    _met_rows += [{"Item": f"Weight — {t}", "Value": round(float(w), 4)}
+                  for t, w in weights.items()]
+    _met_rows += [{"Item": k,
+                   "Value": (round(float(v), 6)
+                             if isinstance(v, float) else v)}
+                  for k, v in s.items()]
+    _dl1, _dl2 = st.columns(2)
+    _dl1.download_button("Download growth series (CSV)", gdf.to_csv(),
+                         "growth_series.csv", "text/csv")
+    _dl2.download_button(
+        "Download metrics + weights (CSV)",
+        pd.DataFrame(_met_rows).to_csv(index=False),
+        "portfolio_metrics.csv", "text/csv")
 
     st.caption("Data: Yahoo Finance adjusted closes (dividends reinvested), "
                "daily. Hypothetical backtest — not investment advice.")
@@ -457,9 +792,10 @@ elif tool == "Strategy Tester":
     dte = st.sidebar.number_input("Days to expiry", min_value=7, max_value=365,
                                   value=30, step=5)
     lookback = st.sidebar.selectbox("Lookback", list(PERIODS), index=2)
-    vol_mode = st.sidebar.radio("Volatility",
-                                ["Trailing 63d realized", "Fixed IV"],
-                                index=0)
+    vol_mode = st.sidebar.radio(
+        "Volatility",
+        ["Trailing 63d realized", "Fixed IV", "Live ATM IV (CBOE chain)"],
+        index=0)
     fixed_iv = st.sidebar.number_input("Fixed IV %", min_value=1.0,
                                        max_value=200.0, value=25.0,
                                        step=1.0) / 100.0
@@ -480,12 +816,37 @@ elif tool == "Strategy Tester":
     prices = closes[ticker].dropna()
 
     mode = "fixed" if vol_mode == "Fixed IV" else "realized"
+    eff_iv = fixed_iv
+    live_note = None
+    if vol_mode == "Live ATM IV (CBOE chain)":
+        _live_iv = None
+        try:
+            _lchain, _lspot, _ = load_chain_bundle(ticker)
+            _lexps = [e for e in vol.expiries(_lchain) if vol.dte(e) >= 1]
+            if _lexps and _lspot:
+                _live_iv = vol.atm_iv(_lchain, _lexps[0], _lspot)
+        except RuntimeError:
+            _live_iv = None
+        if _live_iv:
+            mode, eff_iv = "fixed", float(_live_iv)
+            live_note = (
+                f"Live ATM IV for {ticker}: {_live_iv:.1%} (front expiry, "
+                "CBOE delayed chain). It is applied as the fixed vol for "
+                "the whole run — today's IV held constant, not a "
+                "historical IV series.")
+            st.sidebar.success(f"Live ATM IV: {_live_iv:.1%}")
+        else:
+            st.sidebar.warning(
+                f"Couldn't fetch a live chain IV for {ticker} — falling "
+                "back to trailing 63d realized vol.")
     with st.spinner("Running backtest…"):
-        trades = stg.backtest(prices, strat_name, int(dte), rf, mode, fixed_iv)
+        trades = stg.backtest(prices, strat_name, int(dte), rf, mode, eff_iv)
     if trades.empty:
         st.warning("Not enough history for these settings.")
         st.stop()
     s = stg.trade_stats(trades)
+    if live_note:
+        st.info(live_note)
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Trades", f"{s['Trades']}")
@@ -520,7 +881,7 @@ elif tool == "Strategy Tester":
     st.caption("Same ticker, lookback, expiry and volatility settings for "
                "every strategy.")
     with st.spinner("Running all strategies…"):
-        comp = scmp.compare_all(prices, int(dte), rf, mode, fixed_iv)
+        comp = scmp.compare_all(prices, int(dte), rf, mode, eff_iv)
     if not comp.empty:
         disp = comp.copy()
         for pc in ["Total return", "CAGR", "Max drawdown", "Win rate"]:
@@ -549,9 +910,13 @@ elif tool == "Strategy Tester":
             f"trade_log_{ticker}_{strat_name}.csv".replace(" ", "_"),
             "text/csv")
 
+    _vol_desc = ("trailing 63-day realized vol" if mode == "realized"
+                 else f"fixed {eff_iv:.0%} IV")
+    if live_note:
+        _vol_desc = f"live ATM IV {eff_iv:.1%} held fixed across the run"
     st.caption(
         "Modeled with Black-Scholes (European options, "
-        f"{'fixed ' + f'{fixed_iv:.0%}' + ' IV' if mode == 'fixed' else 'trailing 63-day realized vol'}, "
+        f"{_vol_desc}, "
         f"r={rf:.1%}). Strikes set by delta target at entry; positions held "
         "to expiry, rolled immediately. No bid/ask spread, no commissions, "
         "no early exercise. Fixed size (1 contract / 100 shares), "
@@ -626,10 +991,28 @@ elif tool == "Options Analytics":
         tfig = go.Figure()
         tfig.add_trace(go.Scatter(x=ts["dte"], y=ts["atm_iv"] * 100,
                                   mode="lines+markers", name="ATM IV"))
+        _earn = next_earnings(oa_ticker)
+        _earn_note = None
+        if (_earn is not None and _earn >= date.today()
+                and not ts.empty):
+            _future = ts[pd.to_datetime(ts["expiry"]).dt.date >= _earn]
+            if not _future.empty:
+                _brow = _future.iloc[0]
+                tfig.add_vline(x=int(_brow["dte"]), line_dash="dot",
+                               line_color="#f1c40f",
+                               annotation_text=(
+                                   f"Earnings ~{_earn.isoformat()}"))
+                _earn_note = (
+                    f"Yellow marker: the expiry bracketing the next "
+                    f"earnings date ({_earn.isoformat()}, Yahoo Finance "
+                    f"calendar — may be an estimate). IV usually kinks "
+                    f"up into the print and crushes after it.")
         tfig.update_layout(yaxis_title="IV %", xaxis_title="Days to expiry",
                            height=340, margin=dict(t=10, b=10, l=10, r=10),
                            showlegend=False)
         st.plotly_chart(tfig, use_container_width=True)
+        if _earn_note:
+            st.caption(_earn_note)
 
     st.subheader("Skew — 25Δ risk reversal & butterfly by expiry")
     kfig = go.Figure()
@@ -646,7 +1029,8 @@ elif tool == "Options Analytics":
     st.caption("Risk reversal < 0: downside puts pricier than upside calls — "
                "the usual equity put skew. Butterfly: smile convexity.")
 
-    ivp = ivh.iv_percentile_row(oa_ticker)
+    ivp = ivh.iv_percentile_row(oa_ticker,
+                                current_iv=sk.get("atm_iv"))
     if ivp is not None:
         st.subheader("IV percentile — trailing history")
         i1, i2 = st.columns(2)
@@ -660,13 +1044,21 @@ elif tool == "Options Analytics":
                                   y=ivp["series"]["atm_iv"] * 100,
                                   mode="lines+markers", name="ATM IV",
                                   line=dict(width=2.5)))
+        pfig.add_hline(y=ivp["current_iv"] * 100, line_dash="dash",
+                       line_color="gray")
         pfig.update_layout(yaxis_title="IV %", height=260,
                            margin=dict(t=10, b=10, l=10, r=10),
                            showlegend=False)
         st.plotly_chart(pfig, use_container_width=True)
-        st.caption(f"ATM IV vs its own history — {ivp['n']} daily chain "
-                   f"snapshots, as of {ivp['as_of']}. 0 = cheapest on "
-                   f"record, 100 = richest.")
+        _rank_src = ("today's live" if ivp.get("live")
+                     else "the latest archived")
+        st.caption(f"ATM IV vs its own history — series accrues from "
+                   f"{ivp.get('start', ivp['as_of'])}: {ivp['n']} daily "
+                   f"chain snapshots, as of {ivp['as_of']}. The percentile "
+                   f"ranks {_rank_src} ATM IV against that series. "
+                   f"0 = cheapest on record, 100 = richest. History covers "
+                   f"the six archived names (NVDA, AMD, MU, AAPL, META, "
+                   f"GOOG); other tickers show no panel.")
 
     st.subheader("Gamma exposure (GEX)")
     st.caption("Dealer positioning: long calls / short puts. Positive GEX "

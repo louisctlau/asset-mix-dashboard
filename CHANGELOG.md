@@ -1,5 +1,42 @@
 # Changelog — Portfolio Lab
 
+## 2026-10-22 — Compare mixes, look-through, stress replay, live-IV mode, share links
+- Asset Mix: save the current mix to slots A/B/C and compare them in a new
+  "Compare saved mixes" section — overlaid growth curves on the same
+  lookback/capital/rebalance/benchmark, with a metrics table (total
+  return, CAGR, volatility, Sharpe, max drawdown, best/worst year) and
+  the best value in each row highlighted.
+- Asset Mix: look-through exposure (new module `lookthrough.py`) — each
+  fund's disclosed top holdings aggregated through the portfolio weights
+  into a top-underlyings table and sector breakdown, with an explicit
+  coverage line (share of portfolio weight with holdings data; any
+  tickers without data are named, and the beyond-top-10 remainder is
+  reported as unattributed rather than guessed).
+- Asset Mix: rebalance counterfactual — when a rebalance schedule is
+  selected, a callout reports the same mix never rebalanced (CAGR and
+  total return deltas), computed on the existing backtest path.
+- Asset Mix: stress replay (new module `stress.py`) — the current mix
+  through three fixed windows (COVID crash Feb–Mar 2020 with days to
+  recover the pre-crash peak, the 2022 bear market, the 2018 Q4 selloff)
+  on full price history. A holding whose history starts after a window
+  opens is excluded from that episode and named in a footnote; weights
+  renormalize over the rest, never silently.
+- Asset Mix: share links — the mix (tickers, weights, capital, lookback,
+  rebalance, benchmark) is encoded in the page URL query parameters and
+  shown as a copyable share link; opening a shared link prefills the
+  builder. New download: metrics + weights as CSV.
+- Strategy Tester: third volatility source, "Live ATM IV (CBOE chain)" —
+  today's front-expiry ATM IV from the live delayed chain, applied as the
+  fixed vol for the whole run and labelled as such (it is today's IV,
+  not a historical IV series). If the chain can't be fetched, the tester
+  falls back to trailing 63d realized vol with a warning.
+- Options Analytics: the IV percentile now ranks today's LIVE ATM IV
+  against the archived daily series, and the panel labels the series
+  honestly — accrual start date, number of sessions, archive coverage
+  (the six archived names). The term-structure chart marks the expiry
+  bracketing the next earnings date (Yahoo Finance calendar, labelled
+  as possibly an estimate) where one is known.
+
 ## 2026-10-18 — Strategy Tester: blank CAGR now reads "n/a" + footnote
 - In the side-by-side comparison table, a strategy whose cumulative losses
   exceed its first-trade capital (equity curve crosses zero) made the CAGR

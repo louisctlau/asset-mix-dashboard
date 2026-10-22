@@ -25,7 +25,7 @@ import gex
 import strategy as stg
 import volsurface as vol
 import glossary as gl
-import iv_history as ivh
+import iv_history_v2 as ivh
 import montecarlo as mc
 import presets
 import strategy_compare as scmp

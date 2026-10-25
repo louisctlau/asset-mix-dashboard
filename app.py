@@ -11,7 +11,6 @@ volatility surface (smile, skew, term structure) on the live CBOE delayed
 option chain.
 """
 from datetime import date, datetime, timezone
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -33,6 +32,10 @@ import lookthrough as lt
 import stress
 
 st.set_page_config(page_title="Portfolio Lab", layout="wide")
+# Sidebar nav is hidden: the app is tool-based, and the changelog page is
+# reached via the link at the bottom of the sidebar (USMS pattern).
+st.markdown("<style>[data-testid='stSidebarNav']{display:none;}</style>",
+            unsafe_allow_html=True)
 
 PERIODS = {"1Y": "1y", "3Y": "3y", "5Y": "5y", "10Y": "10y", "Max": "max"}
 TRADING_DAYS = 252
@@ -1170,6 +1173,5 @@ elif tool == "Options Analytics":
 
 
 # ============================== CHANGELOG ==============================
-with st.sidebar.expander("Changelog"):
-    st.markdown(
-        (Path(__file__).resolve().parent / "CHANGELOG.md").read_text())
+st.sidebar.divider()
+st.sidebar.page_link("pages/changelog.py", label="Changelog")

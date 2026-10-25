@@ -1,5 +1,11 @@
 # Changelog — Portfolio Lab
 
+## 2026-10-25 — Changelog as its own page
+- Changelog moved out of the sidebar expander into its own page
+  (`pages/changelog.py`, USMS pattern), linked from the bottom of the
+  sidebar, with a back link to the dashboard. Auto sidebar navigation
+  is hidden so the link is the only route to it.
+
 ## 2026-10-22 — Compare mixes, look-through, stress replay, live-IV mode, share links
 - Asset Mix: save the current mix to slots A/B/C and compare them in a new
   "Compare saved mixes" section — overlaid growth curves on the same

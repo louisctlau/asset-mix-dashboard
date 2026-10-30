@@ -9,7 +9,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-import strategy as stg
+import strategy_v2 as stg
 
 TRADING_DAYS = 252
 

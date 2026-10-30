@@ -195,6 +195,8 @@ def simulate(prices: pd.DataFrame, target_w: pd.Series,
     for dt, r in rets.iterrows():
         if dt.date() in marks:
             cur = w.copy()
+        elif rebalance == "5% bands" and (cur - w).abs().max() > 0.05:
+            cur = w.copy()
         port_rets.append(float((cur * r).sum()))
         cur = cur * (1 + r)
         cur = cur / cur.sum()
@@ -252,7 +254,8 @@ if tool == "Asset Mix":
                 pass
         for _key, _allowed in (
                 ("lookback", list(PERIODS)),
-                ("rebalance", ["Monthly", "Quarterly", "Annual", "None"]),
+                ("rebalance", ["Monthly", "Quarterly", "Annual", "5% bands",
+                                "None"]),
                 ("benchmark", ["SPY", "60/40 (SPY/BND)", "None"])):
             if qp.get(_key) in _allowed and _key not in st.session_state:
                 st.session_state[_key] = qp[_key]
@@ -293,7 +296,7 @@ if tool == "Asset Mix":
                 for k, allowed in (
                         ("lookback", list(PERIODS)),
                         ("rebalance", ["Monthly", "Quarterly", "Annual",
-                                       "None"]),
+                                       "5% bands", "None"]),
                         ("benchmark", ["SPY", "60/40 (SPY/BND)", "None"])):
                     if cfg[k] in allowed:
                         st.session_state[k] = cfg[k]
@@ -345,7 +348,8 @@ if tool == "Asset Mix":
     lookback = st.sidebar.selectbox("Lookback", list(PERIODS), index=2,
                                     key="lookback")
     rebalance = st.sidebar.selectbox(
-        "Rebalance", ["Monthly", "Quarterly", "Annual", "None"], index=1,
+        "Rebalance", ["Monthly", "Quarterly", "Annual", "5% bands", "None"],
+        index=1,
         key="rebalance")
     benchmark = st.sidebar.selectbox(
         "Benchmark", ["SPY", "60/40 (SPY/BND)", "None"], index=0,
@@ -804,6 +808,10 @@ elif tool == "Strategy Tester":
                                        step=1.0) / 100.0
     rf = st.sidebar.number_input("Risk-free rate %", min_value=0.0,
                                  max_value=20.0, value=4.0, step=0.25) / 100.0
+    commission = st.sidebar.number_input("Commission $/contract/side",
+                                          min_value=0.0, value=0.65, step=0.05)
+    slippage = st.sidebar.number_input("Slippage $/share/side",
+                                        min_value=0.0, value=0.01, step=0.01)
 
     if not ticker:
         st.warning("Enter a ticker.")
@@ -843,7 +851,8 @@ elif tool == "Strategy Tester":
                 f"Couldn't fetch a live chain IV for {ticker} — falling "
                 "back to trailing 63d realized vol.")
     with st.spinner("Running backtest…"):
-        trades = stg.backtest(prices, strat_name, int(dte), rf, mode, eff_iv)
+        trades = stg.backtest(prices, strat_name, int(dte), rf, mode, eff_iv,
+                              commission, slippage)
     if trades.empty:
         st.warning("Not enough history for these settings.")
         st.stop()
@@ -863,6 +872,15 @@ elif tool == "Strategy Tester":
               else "∞")
     c3.metric("Max drawdown", f"{s['Max drawdown']:.1%}")
     c4.metric("Capital (first trade)", f"${s['Capital (first trade)']:,.0f}")
+    c1, c2 = st.columns(2)
+    c1.metric("Total P&L (net of costs)", f"${s['Total P&L (net)']:,.0f}")
+    c2.metric("Return on capital (net)",
+              f"{s['Return on capital (net)']:.1%}")
+    st.caption(f"Costs: ${commission:.2f}/contract/side commission + "
+               f"${slippage:.2f}/share/side slippage, charged on open and "
+               f"close; stock legs carry no commission. Gross Total P&L "
+               f"${s['Total P&L']:,.0f} less "
+               f"${s['Total P&L'] - s['Total P&L (net)']:,.0f} costs.")
 
     st.subheader("Equity curve")
     c0 = s["Capital (first trade)"]
@@ -873,6 +891,11 @@ elif tool == "Strategy Tester":
     efig = go.Figure()
     efig.add_trace(go.Scatter(x=equity.index, y=equity.values,
                               name=strat_name, line=dict(width=2.5)))
+    if commission or slippage:
+        equity_net = c0 + trades.set_index("Expiry")["P&L (net)"].cumsum()
+        efig.add_trace(go.Scatter(x=equity_net.index, y=equity_net.values,
+                                  name=f"{strat_name} (net of costs)",
+                                  line=dict(dash="dot")))
     efig.add_trace(go.Scatter(x=bh.index, y=bh.values, name=f"Buy & Hold {ticker}",
                               line=dict(dash="dash")))
     efig.update_layout(yaxis_title="$", height=360,
@@ -882,7 +905,8 @@ elif tool == "Strategy Tester":
 
     st.subheader("All strategies — side by side")
     st.caption("Same ticker, lookback, expiry and volatility settings for "
-               "every strategy.")
+               "every strategy. Comparison figures are gross of commissions "
+               "and slippage; net figures are shown per strategy above.")
     with st.spinner("Running all strategies…"):
         comp = scmp.compare_all(prices, int(dte), rf, mode, eff_iv)
     if not comp.empty:
@@ -904,7 +928,8 @@ elif tool == "Strategy Tester":
 
     with st.expander(f"Trade log ({len(trades)} trades)"):
         show = trades.copy()
-        for col in ["S", "S_T", "Net premium", "P&L", "Capital"]:
+        for col in ["S", "S_T", "Net premium", "P&L", "Costs", "P&L (net)",
+                    "Capital"]:
             show[col] = show[col].round(2)
         show["IV"] = (show["IV"] * 100).round(1).astype(str) + "%"
         st.dataframe(show, use_container_width=True)

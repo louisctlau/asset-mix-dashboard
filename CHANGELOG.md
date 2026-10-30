@@ -1,5 +1,22 @@
 # Changelog — Portfolio Lab
 
+## 2026-10-30 — 5% rebalance bands, Strategy Tester costs, put/call columns
+- Asset Mix — new "5% bands" rebalance mode: holdings reset to target
+  weights at the next open after any holding drifts more than 5 percentage
+  points from target (calendar Monthly/Quarterly/Annual/None unchanged;
+  the rebalancing check, weight-drift table, share links and stress replay
+  all accept the new mode).
+- Strategy Tester — commissions and slippage: sidebar inputs ($0.65 /
+  contract / side commission, $0.01 / share / side slippage by default,
+  charged on open and close; stock legs carry no commission). Each trade
+  now shows Costs and P&L (net), the metrics add Total P&L (net) and
+  Return on capital (net), and the equity curve adds a net-of-costs line.
+  The side-by-side comparison stays gross of costs, stated in its caption.
+- Data — options_history.csv gains put_oi / call_oi / pc_oi columns
+  (total put/call open interest and their ratio per ticker per day, from
+  the archive builder), feeding the USMS put/call panel; the builder
+  script is now part of the push file list so it ships with the repo.
+
 ## 2026-10-25 — Changelog as its own page
 - Changelog moved out of the sidebar expander into its own page
   (`pages/changelog.py`, USMS pattern), linked from the bottom of the

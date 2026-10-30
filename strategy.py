@@ -1,8 +1,10 @@
 """Black-Scholes option strategy backtester.
 
 European-style options priced with Black-Scholes on historical underlying
-prices. No early exercise, no bid/ask spread, no commissions — modeled
-prices, not market prices.
+prices. No early exercise — modeled prices, not market prices.
+Commissions and slippage are applied per option contract per side when
+configured (backtest defaults are zero; the app defaults to $0.65
+commission + $0.01/share slippage); stock legs carry no commission.
 """
 from math import erf, exp, log, sqrt
 
@@ -102,9 +104,13 @@ def capital_required(S: float, legs: list, stock: int) -> float:
 
 
 def backtest(prices: pd.Series, strategy: str, dte: int, r: float,
-             vol_mode: str, fixed_iv: float) -> pd.DataFrame:
+             vol_mode: str, fixed_iv: float, commission: float = 0.0,
+             slippage: float = 0.0) -> pd.DataFrame:
     """Roll the strategy every `dte` trading days; hold each trade to expiry.
 
+    commission is $ per option contract per side; slippage is $ per share
+    per side ($1 per contract per side at the $0.01 default). Both are
+    charged on open and on close. Stock legs carry no commission.
     Returns a DataFrame with one row per trade.
     """
     spec = STRATEGIES[strategy]
@@ -135,6 +141,9 @@ def backtest(prices: pd.Series, strategy: str, dte: int, r: float,
             expiry_val += qty * intrinsic * 100
         pnl = entry_flow + expiry_val
         cap = capital_required(S, priced, stock)
+        n_contracts = sum(abs(qty) for _, qty, _, _ in priced)
+        costs = (n_contracts * (commission + slippage * 100) * 2
+                 if priced else 0.0)
         leg_txt = "; ".join(
             f"{'+' if qty > 0 else ''}{qty} {kind} K={K:.1f} @ ${px:.2f}"
             for kind, qty, K, px in priced) or "—"
@@ -142,7 +151,8 @@ def backtest(prices: pd.Series, strategy: str, dte: int, r: float,
             "Entry": t_in.date(), "S": S, "Legs": leg_txt,
             "Net premium": -sum(qty * px * 100 for _, qty, _, px in priced),
             "Expiry": t_out.date(), "S_T": S_T,
-            "P&L": pnl, "Capital": cap, "IV": sig,
+            "P&L": pnl, "Costs": costs, "P&L (net)": pnl - costs,
+            "Capital": cap, "IV": sig,
         })
         i += dte
     return pd.DataFrame(rows)
@@ -153,6 +163,7 @@ def trade_stats(trades: pd.DataFrame) -> dict:
     if trades.empty:
         return {}
     pnl = trades["P&L"]
+    pnl_net = trades["P&L (net)"] if "P&L (net)" in trades else pnl
     c0 = float(trades["Capital"].iloc[0])
     equity = c0 + pnl.cumsum()
     wins = pnl[pnl > 0]
@@ -162,7 +173,9 @@ def trade_stats(trades: pd.DataFrame) -> dict:
         "Trades": len(trades),
         "Win rate": len(wins) / len(trades),
         "Total P&L": pnl.sum(),
+        "Total P&L (net)": pnl_net.sum(),
         "Return on capital": pnl.sum() / c0 if c0 else float("nan"),
+        "Return on capital (net)": pnl_net.sum() / c0 if c0 else float("nan"),
         "Avg P&L / trade": pnl.mean(),
         "Avg win": wins.mean() if len(wins) else 0.0,
         "Avg loss": losses.mean() if len(losses) else 0.0,

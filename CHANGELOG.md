@@ -24,7 +24,10 @@
 - Default is unchanged (Trailing 63d realized) and the cost model is
   untouched ($0.65/contract/side + $0.01/share/side, open and close).
   The side-by-side comparison uses the same vol source as the selected
-  strategy.
+  strategy. Engine renamed `strategy_v2.py` → `strategy_v3.py` (old file
+  deleted): the backtest signature gained the new `iv_series` parameter,
+  and Streamlit Cloud has served stale modules beside fresh app.py
+  before — the rename forces a fresh import.
 
 ## 2026-10-30 — 5% rebalance bands, Strategy Tester costs, put/call columns
 - Asset Mix — new "5% bands" rebalance mode: holdings reset to target

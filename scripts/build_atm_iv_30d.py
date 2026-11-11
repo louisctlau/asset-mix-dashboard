@@ -28,7 +28,7 @@ Coverage limits (honest, not invented):
     only joined the archive on 2026-10-10 — no SPY IV exists before then.
   - 2026-10-19 is a permanent archive gap (no chain file that day).
   - The Strategy Tester therefore falls back to trailing 63d realised vol
-    for any entry date with no archive IV (see strategy_v2.backtest,
+    for any entry date with no archive IV (see strategy_v3.backtest,
     vol_mode="hist_iv"); the trade log marks those rows "realized
     (fallback)" so a backtest never silently prices on invented IV.
 

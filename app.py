@@ -22,7 +22,7 @@ import yfinance as yf
 
 import option_chains as chains
 import gex
-import strategy_v2 as stg
+import strategy_v3 as stg
 import volsurface as vol
 import glossary as gl
 import iv_history_v2 as ivh

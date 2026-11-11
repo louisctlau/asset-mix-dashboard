@@ -11,6 +11,7 @@ volatility surface (smile, skew, term structure) on the live CBOE delayed
 option chain.
 """
 from datetime import date, datetime, timezone
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -107,6 +108,32 @@ def load_chain_bundle(ticker: str):
     if chain.empty or spot is None:
         raise RuntimeError(f"No chain data for {ticker}")
     return chain, spot, datetime.now(timezone.utc)
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def load_atm_iv_30d() -> dict | None:
+    """Historical 30-day constant-maturity ATM IV, per ticker.
+
+    Reads data/atm_iv_30d.csv (built by scripts/build_atm_iv_30d.py from
+    the daily options-chain archive). Returns {ticker: Series indexed by
+    Timestamp -> IV as a fraction}, or None if the file is missing or
+    unreadable. Never raises — the caller falls back to realised vol.
+    Coverage: 2026-09-28–2026-11-10 for the six single names, SPY only
+    from 2026-10-10, and 2026-10-19 is a permanent archive gap.
+    """
+    try:
+        csv = Path(__file__).resolve().parent / "data" / "atm_iv_30d.csv"
+        df = pd.read_csv(csv, parse_dates=["date"])
+    except Exception:
+        return None
+    if df.empty or "atm_iv_30d" not in df.columns:
+        return None
+    out = {}
+    for tick, sub in df.groupby("ticker"):
+        s = sub.set_index("date")["atm_iv_30d"].sort_index()
+        s.index = pd.to_datetime(s.index).normalize()
+        out[str(tick).upper()] = s
+    return out or None
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
@@ -801,7 +828,8 @@ elif tool == "Strategy Tester":
     lookback = st.sidebar.selectbox("Lookback", list(PERIODS), index=2)
     vol_mode = st.sidebar.radio(
         "Volatility",
-        ["Trailing 63d realized", "Fixed IV", "Live ATM IV (CBOE chain)"],
+        ["Trailing 63d realized", "Fixed IV", "Live ATM IV (CBOE chain)",
+         "Historical ATM IV (archive)"],
         index=0)
     fixed_iv = st.sidebar.number_input("Fixed IV %", min_value=1.0,
                                        max_value=200.0, value=25.0,
@@ -829,6 +857,28 @@ elif tool == "Strategy Tester":
     mode = "fixed" if vol_mode == "Fixed IV" else "realized"
     eff_iv = fixed_iv
     live_note = None
+    hist_note = None
+    iv_series = None
+    if vol_mode == "Historical ATM IV (archive)":
+        _hist = load_atm_iv_30d()
+        if _hist is not None and ticker in _hist:
+            iv_series = _hist[ticker]
+            mode = "hist_iv"
+            _d0 = iv_series.index.min().date()
+            _d1 = iv_series.index.max().date()
+            hist_note = (
+                f"Historical 30-day ATM IV for {ticker} from the "
+                f"options-chain archive ({_d0}–{_d1}, 30-day "
+                "constant-maturity interpolation between the expiries "
+                "bracketing 30 DTE). Entry dates with no archive IV — "
+                "before coverage starts, or the 2026-10-19 archive gap — "
+                "fall back to trailing 63d realized vol; the trade log "
+                "marks those rows.")
+            st.sidebar.success(f"Archive ATM IV: {_d0}–{_d1}")
+        else:
+            st.sidebar.warning(
+                f"No archive ATM IV for {ticker} — falling back to "
+                "trailing 63d realized vol.")
     if vol_mode == "Live ATM IV (CBOE chain)":
         _live_iv = None
         try:
@@ -852,13 +902,15 @@ elif tool == "Strategy Tester":
                 "back to trailing 63d realized vol.")
     with st.spinner("Running backtest…"):
         trades = stg.backtest(prices, strat_name, int(dte), rf, mode, eff_iv,
-                              commission, slippage)
+                              commission, slippage, iv_series=iv_series)
     if trades.empty:
         st.warning("Not enough history for these settings.")
         st.stop()
     s = stg.trade_stats(trades)
     if live_note:
         st.info(live_note)
+    if hist_note:
+        st.info(hist_note)
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Trades", f"{s['Trades']}")
@@ -908,7 +960,8 @@ elif tool == "Strategy Tester":
                "every strategy. Comparison figures are gross of commissions "
                "and slippage; net figures are shown per strategy above.")
     with st.spinner("Running all strategies…"):
-        comp = scmp.compare_all(prices, int(dte), rf, mode, eff_iv)
+        comp = scmp.compare_all(prices, int(dte), rf, mode, eff_iv,
+                                iv_series=iv_series)
     if not comp.empty:
         disp = comp.copy()
         for pc in ["Total return", "CAGR", "Max drawdown", "Win rate"]:
@@ -942,6 +995,10 @@ elif tool == "Strategy Tester":
                  else f"fixed {eff_iv:.0%} IV")
     if live_note:
         _vol_desc = f"live ATM IV {eff_iv:.1%} held fixed across the run"
+    if hist_note:
+        _vol_desc = ("historical 30-day ATM IV from the options-chain "
+                     "archive (trailing 63d realized vol where the "
+                     "archive has no IV)")
     st.caption(
         "Modeled with Black-Scholes (European options, "
         f"{_vol_desc}, "

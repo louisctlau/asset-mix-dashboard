@@ -15,10 +15,11 @@ TRADING_DAYS = 252
 
 
 def compare_all(prices: pd.Series, dte: int, r: float, vol_mode: str,
-                fixed_iv: float) -> pd.DataFrame:
+                fixed_iv: float, *, iv_series: pd.Series | None = None) -> pd.DataFrame:
     rows = []
     for name in stg.STRATEGIES:
-        trades = stg.backtest(prices, name, dte, r, vol_mode, fixed_iv)
+        trades = stg.backtest(prices, name, dte, r, vol_mode, fixed_iv,
+                              iv_series=iv_series)
         if trades.empty:
             continue
         s = stg.trade_stats(trades)

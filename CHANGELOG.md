@@ -1,5 +1,31 @@
 # Changelog — Portfolio Lab
 
+## 2026-11-11 — Strategy Tester: price backtests on actual implied vol
+- Strategy Tester — new "Historical ATM IV (archive)" volatility source:
+  options are priced on the actual 30-day constant-maturity ATM IV from
+  the daily options-chain archive (`data/atm_iv_30d.csv`, built by
+  `scripts/build_atm_iv_30d.py`), instead of trailing 63d realised vol or
+  a fixed IV number. The series is a VIX-style total-variance
+  interpolation between the two expiries bracketing 30 DTE (an expiry
+  landing exactly on 30 DTE is used directly); the bracket exists on all
+  214 ticker-days in the archive, so the series never falls back to the
+  nearest expiry in practice. The nearest-expiry IV in
+  `data/options_history.csv` was not reused: it jumps at each front-expiry
+  roll, while the 30-day constant-maturity series stays smooth and
+  comparable across dates — the right vol for pricing a 30-DTE trade on
+  every roll.
+- Coverage limits are handled honestly, not papered over: the series
+  starts 2026-09-28 for AAPL/AMD/GOOG/META/MU/NVDA but SPY only joined
+  the archive on 2026-10-10, and 2026-10-19 is a permanent archive gap.
+  Entry dates with no archive IV fall back to trailing 63d realised vol
+  and the trade log marks those rows "realized (fallback)", so a backtest
+  never prices on invented IV. SPY 30-day IV over the covered window runs
+  12.1%–22.4% (mean 14.8%), inside the plausible 10–35% band.
+- Default is unchanged (Trailing 63d realized) and the cost model is
+  untouched ($0.65/contract/side + $0.01/share/side, open and close).
+  The side-by-side comparison uses the same vol source as the selected
+  strategy.
+
 ## 2026-10-30 — 5% rebalance bands, Strategy Tester costs, put/call columns
 - Asset Mix — new "5% bands" rebalance mode: holdings reset to target
   weights at the next open after any holding drifts more than 5 percentage

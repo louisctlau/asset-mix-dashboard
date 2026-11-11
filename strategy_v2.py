@@ -105,12 +105,18 @@ def capital_required(S: float, legs: list, stock: int) -> float:
 
 def backtest(prices: pd.Series, strategy: str, dte: int, r: float,
              vol_mode: str, fixed_iv: float, commission: float = 0.0,
-             slippage: float = 0.0) -> pd.DataFrame:
+             slippage: float = 0.0, *, iv_series: pd.Series | None = None) -> pd.DataFrame:
     """Roll the strategy every `dte` trading days; hold each trade to expiry.
 
     commission is $ per option contract per side; slippage is $ per share
     per side ($1 per contract per side at the $0.01 default). Both are
     charged on open and on close. Stock legs carry no commission.
+    vol_mode: "fixed" (fixed_iv), "realized" (trailing 63d realised vol),
+    or "hist_iv" (historical ATM IV from iv_series, indexed by date, with
+    fallback to trailing 63d realised vol on any entry date the series
+    does not cover — the archive starts 2026-09-28, SPY only 2026-10-10,
+    and 2026-10-19 is a permanent gap, so early entries fall back rather
+    than pricing on invented IV; the "Vol source" column marks them).
     Returns a DataFrame with one row per trade.
     """
     spec = STRATEGIES[strategy]
@@ -123,9 +129,18 @@ def backtest(prices: pd.Series, strategy: str, dte: int, r: float,
     while i + dte < n:
         S = float(prices.iloc[i])
         t_in = prices.index[i]
-        sig = (fixed_iv if vol_mode == "fixed"
-               else max(float(log_rets.iloc[i - 63:i].std() * sqrt(TRADING_DAYS)),
-                        0.05))
+        realized = max(float(log_rets.iloc[i - 63:i].std() * sqrt(TRADING_DAYS)),
+                       0.05)
+        if vol_mode == "fixed":
+            sig, vol_src = fixed_iv, "fixed"
+        elif vol_mode == "hist_iv" and iv_series is not None:
+            iv = iv_series.get(pd.Timestamp(t_in).normalize(), np.nan)
+            if iv is not None and np.isfinite(float(iv)) and float(iv) > 0:
+                sig, vol_src = float(iv), "archive"
+            else:
+                sig, vol_src = realized, "realized (fallback)"
+        else:
+            sig, vol_src = realized, "realized"
         priced = []
         for kind, dd, qty in spec["legs"]:
             K = strike_for_delta(S, T, r, sig, kind, dd)
@@ -152,7 +167,7 @@ def backtest(prices: pd.Series, strategy: str, dte: int, r: float,
             "Net premium": -sum(qty * px * 100 for _, qty, _, px in priced),
             "Expiry": t_out.date(), "S_T": S_T,
             "P&L": pnl, "Costs": costs, "P&L (net)": pnl - costs,
-            "Capital": cap, "IV": sig,
+            "Capital": cap, "IV": sig, "Vol source": vol_src,
         })
         i += dte
     return pd.DataFrame(rows)

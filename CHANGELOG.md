@@ -1,5 +1,17 @@
 # Changelog — Portfolio Lab
 
+## 2026-11-11 — Sidebar data as-of stamp
+- Sidebar (all three tools) now carries a one-line data stamp: "Data as
+  of Nov 10, 2026 · options archive (daily); prices live via Yahoo
+  Finance". The date is derived at runtime from the latest row of the
+  bundled daily options archive (`data/options_history.csv`), never
+  hardcoded, so it moves forward with each daily archive rebuild. The
+  stamp names the archive explicitly: Yahoo prices are fetched live per
+  tool, so the app does not claim a price date it did not measure.
+  Asset Mix and Strategy Tester previously showed no data date at all
+  (Options Analytics already stamps its own panels); the stamp is hidden
+  silently if the archive is missing or unreadable.
+
 ## 2026-11-11 — Strategy Tester: price backtests on actual implied vol
 - Strategy Tester — new "Historical ATM IV (archive)" volatility source:
   options are priced on the actual 30-day constant-maturity ATM IV from

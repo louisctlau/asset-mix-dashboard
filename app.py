@@ -1256,4 +1256,18 @@ elif tool == "Options Analytics":
 
 # ============================== CHANGELOG ==============================
 st.sidebar.divider()
+# Data as-of stamp: latest date in the bundled daily options archive
+# (data/options_history.csv, via the already-cached ivh loader) — derived
+# at runtime, never hardcoded, so it moves forward with each daily archive
+# rebuild. The archive date is the honest single "data through" date the
+# app itself holds: Yahoo prices are fetched live per tool, so the stamp
+# names the archive explicitly rather than claiming a price date it did
+# not measure. Hidden silently if the archive is missing/unreadable.
+_archive = ivh.load_history()
+if _archive is not None and not _archive.empty:
+    _asof = pd.to_datetime(_archive["date"]).max().date()
+    st.sidebar.caption(
+        f"Data as of {_asof:%b %d, %Y} · options archive (daily); "
+        "prices live via Yahoo Finance"
+    )
 st.sidebar.page_link("pages/changelog.py", label="Changelog")

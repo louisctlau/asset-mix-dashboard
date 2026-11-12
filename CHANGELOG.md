@@ -19,7 +19,11 @@
   Plotly's ~5 auto ticks — bars between labelled strikes were hard to
   place. The step is picked from the visible strike window (round $1/$2/
   $5/$10/$25 steps; SPY renders every $10, 700–820). No data or
-  calculation change; the x-axis is untouched.
+  calculation change; the x-axis is untouched. The lines are drawn as
+  above-layer shapes, not axis gridlines: Plotly's gridlines render
+  behind the opaque bars, so a line only showed in the gaps and read as
+  sitting on a bar's edge — the new lines visibly cross each bar at its
+  strike.
 
 ## 2026-11-11 — Sidebar data as-of stamp
 - Sidebar (all three tools) now carries a one-line data stamp: "Data as

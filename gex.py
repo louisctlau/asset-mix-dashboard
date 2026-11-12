@@ -108,7 +108,13 @@ def gex_chart(g: dict, title: str) -> go.Figure:
     # only ~5 strike labels across the window, so bars between them are
     # hard to place. Aim for ~12 evenly spaced strike gridlines, each
     # labelled with its strike, using a round step.
+    # Note: axis gridlines render BEHIND the opaque bars, so a gridline
+    # is only visible in the gaps between bars and reads as sitting on a
+    # bar's edge. Draw the strike lines as above-layer shapes instead so
+    # each line visibly crosses its bar, and turn the y-axis grid off to
+    # avoid doubling.
     yaxis = dict(grid)
+    strike_lines: list[float] = []
     if len(df) > 0:
         lo, hi = float(df.index.min()), float(df.index.max())
         raw = (hi - lo) / 12.0
@@ -116,7 +122,17 @@ def gex_chart(g: dict, title: str) -> go.Figure:
                       if s >= raw), 500)
         import math
         tick0 = math.floor(lo / dtick) * dtick
-        yaxis.update(tickmode="linear", tick0=tick0, dtick=dtick)
+        yaxis.update(tickmode="linear", tick0=tick0, dtick=dtick,
+                     showgrid=False)
+        t = tick0
+        while t <= hi + 1e-9:
+            if t >= lo - 1e-9:
+                strike_lines.append(t)
+            t += dtick
+    for t in strike_lines:
+        fig.add_shape(type="line", x0=0, x1=1, xref="paper",
+                      y0=t, y1=t, yref="y", layer="above",
+                      line=dict(color="rgba(160,160,160,0.35)", width=1))
     fig.update_layout(title=title, height=max(420, 14 * len(df)),
                       margin=dict(t=50, b=40, l=10, r=10),
                       yaxis_title="Strike",

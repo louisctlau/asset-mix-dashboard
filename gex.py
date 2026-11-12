@@ -104,12 +104,25 @@ def gex_chart(g: dict, title: str) -> go.Figure:
                       annotation_text=f"γflip {g['zero_gamma']:.0f}")
     grid = dict(showgrid=True, gridcolor="rgba(160,160,160,0.25)",
                   gridwidth=1)
+    # Denser labelled horizontal gridlines: Plotly's auto y-ticks leave
+    # only ~5 strike labels across the window, so bars between them are
+    # hard to place. Aim for ~12 evenly spaced strike gridlines, each
+    # labelled with its strike, using a round step.
+    yaxis = dict(grid)
+    if len(df) > 0:
+        lo, hi = float(df.index.min()), float(df.index.max())
+        raw = (hi - lo) / 12.0
+        dtick = next((s for s in (1, 2, 5, 10, 25, 50, 100, 200, 500)
+                      if s >= raw), 500)
+        import math
+        tick0 = math.floor(lo / dtick) * dtick
+        yaxis.update(tickmode="linear", tick0=tick0, dtick=dtick)
     fig.update_layout(title=title, height=max(420, 14 * len(df)),
                       margin=dict(t=50, b=40, l=10, r=10),
                       yaxis_title="Strike",
                       xaxis_title="Net GEX ($M per 1-pt move)",
                       barmode="relative", bargap=0.15,
-                      xaxis=grid, yaxis=grid,
+                      xaxis=grid, yaxis=yaxis,
                       legend=dict(orientation="h", yanchor="top", y=0.99,
                                   xanchor="right", x=0.99,
                                   bgcolor="rgba(0,0,0,0.6)"))

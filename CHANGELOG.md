@@ -1,5 +1,13 @@
 # Changelog — Portfolio Lab
 
+## 2026-11-12 — GEX chart: denser labelled horizontal gridlines
+- The Net GEX by strike chart (Options Analytics) now draws ~12 evenly
+  spaced horizontal gridlines, each labelled with its strike, instead of
+  Plotly's ~5 auto ticks — bars between labelled strikes were hard to
+  place. The step is picked from the visible strike window (round $1/$2/
+  $5/$10/$25 steps; SPY renders every $10, 700–820). No data or
+  calculation change; the x-axis is untouched.
+
 ## 2026-11-11 — Sidebar data as-of stamp
 - Sidebar (all three tools) now carries a one-line data stamp: "Data as
   of Nov 10, 2026 · options archive (daily); prices live via Yahoo

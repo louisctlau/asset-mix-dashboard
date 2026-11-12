@@ -1,5 +1,18 @@
 # Changelog — Portfolio Lab
 
+## 2026-11-12 — Chain table crash fixed (alternate-root duplicates)
+- The "Chain — (model greeks)" table on Options Analytics crashed with
+  "ValueError: Index contains duplicate entries, cannot reshape"
+  whenever the selected expiry had duplicate contracts. Cause: CBOE's
+  delayed feed returns alternate-root listings alongside the standard
+  chain (B1VDA next to NVDA, B1SPY next to SPY, SPXW/SPXO next to SPX)
+  that parse to the same (expiry, strike, type); the alternate rows
+  carry ~zero OI/volume and stale-looking quotes. `fetch_chain` now
+  keeps the most liquid contract per (expiry, strike, type) — volume,
+  then OI — so the table, the Greeks-by-strike chart and the vol smile
+  all see one contract per strike. GEX is unaffected in practice (the
+  dropped rows had ~zero OI).
+
 ## 2026-11-12 — GEX chart: denser labelled horizontal gridlines
 - The Net GEX by strike chart (Options Analytics) now draws ~12 evenly
   spaced horizontal gridlines, each labelled with its strike, instead of

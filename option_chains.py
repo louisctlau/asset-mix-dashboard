@@ -88,4 +88,15 @@ def fetch_chain(ticker: str) -> tuple[pd.DataFrame, float | None]:
         for c in ("bid", "ask", "iv", "cboe_delta", "cboe_gamma",
                   "cboe_theta", "cboe_vega"):
             df[c] = pd.to_numeric(df[c], errors="coerce")
+        # CBOE returns alternate-root listings alongside the standard
+        # chain (B1VDA next to NVDA, B1SPY next to SPY, SPXW/SPXO next to
+        # SPX) that parse to the same (expiry, strike, type) — the
+        # alternate rows carry ~zero OI/volume and stale-looking quotes,
+        # and the duplicates crash the Chain table pivot downstream.
+        # Keep the most liquid contract per key (volume, then OI).
+        df = (df.assign(_vol=df["volume"].fillna(0),
+                        _oi=df["open_interest"].fillna(0))
+                .sort_values(["_vol", "_oi"], ascending=False)
+                .drop_duplicates(subset=["expiry", "strike", "option_type"])
+                .drop(columns=["_vol", "_oi"]).reset_index(drop=True))
     return df, (float(und) if und else None)

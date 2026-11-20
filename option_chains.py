@@ -95,7 +95,24 @@ def _dedupe(df: pd.DataFrame) -> pd.DataFrame:
 
 def _fetch_yahoo(yahoo_sym: str,
                  max_expiries: int = _MAX_EXPIRIES) -> tuple[pd.DataFrame, float]:
-    """Full chain from Yahoo Finance option chains (one request/expiry)."""
+    """Full chain from Yahoo Finance option chains (one request/expiry).
+
+    Retries 3x with backoff: Yahoo rate-limits Streamlit Cloud's shared
+    egress IPs intermittently (t.options comes back empty), and a retry
+    a few seconds later usually succeeds.
+    """
+    last = None
+    for attempt in range(3):
+        try:
+            return _fetch_yahoo_once(yahoo_sym, max_expiries)
+        except Exception as e:  # noqa: BLE001 - retry, then report
+            last = e
+            time.sleep(5 * (attempt + 1))
+    raise RuntimeError(f"Yahoo failed for {yahoo_sym} after 3 tries: {last}")
+
+
+def _fetch_yahoo_once(yahoo_sym: str,
+                      max_expiries: int = _MAX_EXPIRIES) -> tuple[pd.DataFrame, float]:
     t = yf.Ticker(yahoo_sym)
     expiries = list(t.options or [])
     if not expiries:

@@ -4,6 +4,7 @@
 - CBOE moved its delayed-quotes API to cdn-api.cboe.com behind Cloudflare bot protection: every server-side fetch (urllib, curl, even a real browser) now gets a 403 "Attention Required" page, so Options Analytics and the Strategy Tester's live-ATM-IV mode stopped loading.
 - `option_chains.py` now fetches from Yahoo Finance option chains first (bid/ask, volume, open interest, IV) and fills the delta/gamma columns with Black-Scholes model values (r = 5%, q = 0); CBOE stays as a one-shot fallback. The tab, vol surface, skew, GEX and chain table are unchanged — the footer now names the source actually served.
 - The daily archive fetcher (`fetch_chains.py`) switched to the same Yahoo-first order so today's 17:00 snapshot still lands; downstream history builders only consume OI, gamma, IV and spot, so the swap is transparent there.
+- Yahoo fetches now retry 3x with backoff: Yahoo intermittently rate-limits Streamlit Cloud's shared IPs (`t.options` comes back empty), which briefly left the live chain failing around midday Nov 20 even though the same fetch worked minutes later.
 
 ## 2026-11-12 — Chain table crash fixed (alternate-root duplicates)
 - The "Chain — (model greeks)" table on Options Analytics crashed with

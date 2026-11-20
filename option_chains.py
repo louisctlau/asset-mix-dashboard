@@ -1,19 +1,30 @@
-"""Live CBOE delayed option chains (keyless, ~15 min delayed).
+"""Live option chains — Yahoo Finance first, CBOE delayed as fallback.
 
-Same endpoint as the daily archive fetcher (options-chain-archive), but
-returns the chain for one ticker on demand for the app. No snapshot
-columns — the app caches with st.cache_data instead.
+2026-11-20: CBOE moved its delayed-quotes API to cdn-api.cboe.com and
+put Cloudflare bot protection in front of it — every server-side fetch
+(urllib, curl, even a real browser) now gets a 403 "Attention Required"
+page, so the live CBOE feed is unusable from Streamlit Cloud. Yahoo
+Finance option chains carry the same fields the app needs (bid/ask,
+volume, open interest, IV) and work from here; the app computes its own
+Black-Scholes greeks from IV anyway, so the Yahoo path fills the
+cboe_delta / cboe_gamma columns with model values (r = 5%, q = 0) and
+downstream code (volsurface skew, GEX) is untouched. CBOE stays as a
+one-shot fallback in case it unblocks later.
 """
 from __future__ import annotations
 
 import json
 import time
 import urllib.request
+from datetime import date
 
 import pandas as pd
+import yfinance as yf
+
+import greeks as _gk
 
 TICKERS = ["NVDA", "AMD", "MU", "AAPL", "META", "GOOG"]  # archive universe;
-# the app itself accepts any ticker with a CBOE delayed chain.
+# the app itself accepts any ticker with a listed option chain.
 CBOE_URL = "https://cdn.cboe.com/api/global/delayed_quotes/options/{}.json"
 
 # Index options need CBOE's underscore-prefixed symbols; Yahoo quotes the
@@ -24,6 +35,9 @@ INDEX_TICKERS = {
     "NDX": ("_NDX", "^NDX"),
     "VIX": ("_VIX", "^VIX"),
 }
+
+_RF = 0.05  # model-greeks risk-free rate (r barely moves delta/gamma)
+_MAX_EXPIRIES = 20  # bounds the Yahoo fetch (~1s/expiry); term structure uses 12
 
 
 def resolve_ticker(ticker: str) -> tuple[str, str]:
@@ -54,13 +68,82 @@ def _parse_occ(sym: str) -> tuple[str, str, float]:
     return expiry, otype, strike
 
 
-def fetch_chain(ticker: str) -> tuple[pd.DataFrame, float | None]:
-    """Fetch the full delayed chain for one ticker.
+def _model_greeks(spot: float, strike: float, expiry: str, iv: float,
+                  kind: str) -> dict:
+    """BS delta/gamma/theta/vega for one contract (r=5%, q=0)."""
+    d = max((date.fromisoformat(expiry) - date.today()).days, 0.5) / 365.0
+    try:
+        g = _gk.greeks(spot, strike, d, _RF, 0.0, max(iv, 1e-4), kind)
+        return {"cboe_delta": g["delta"], "cboe_gamma": g["gamma"],
+                "cboe_theta": g["theta"], "cboe_vega": g["vega"]}
+    except Exception:  # noqa: BLE001 - leave greeks blank, keep the row
+        return {"cboe_delta": None, "cboe_gamma": None,
+                "cboe_theta": None, "cboe_vega": None}
 
-    Returns (chain DataFrame, underlying price or None). Raises
-    RuntimeError if the fetch fails.
-    """
-    data = _get(CBOE_URL.format(ticker.upper()))["data"]
+
+def _dedupe(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop alternate-root duplicates (B1SPY next to SPY etc.) keeping the
+    most liquid contract per (expiry, strike, type)."""
+    if df.empty:
+        return df
+    return (df.assign(_vol=df["volume"].fillna(0),
+                      _oi=df["open_interest"].fillna(0))
+              .sort_values(["_vol", "_oi"], ascending=False)
+              .drop_duplicates(subset=["expiry", "strike", "option_type"])
+              .drop(columns=["_vol", "_oi"]).reset_index(drop=True))
+
+
+def _fetch_yahoo(yahoo_sym: str,
+                 max_expiries: int = _MAX_EXPIRIES) -> tuple[pd.DataFrame, float]:
+    """Full chain from Yahoo Finance option chains (one request/expiry)."""
+    t = yf.Ticker(yahoo_sym)
+    expiries = list(t.options or [])
+    if not expiries:
+        raise RuntimeError(f"Yahoo returned no expiries for {yahoo_sym}")
+    hist = t.history(period="1d")
+    if hist is not None and not hist.empty:
+        spot = float(hist["Close"].iloc[-1])
+    else:
+        spot = float(t.fast_info.get("last_price") or 0) or None
+    if not spot:
+        raise RuntimeError(f"Yahoo returned no spot for {yahoo_sym}")
+    rows = []
+    for exp in expiries[:max_expiries]:
+        try:
+            chain = t.option_chain(exp)
+        except Exception:  # noqa: BLE001 - skip an expiry that fails
+            continue
+        for kind, frame in (("call", chain.calls), ("put", chain.puts)):
+            for _, row in frame.iterrows():
+                iv = row.get("impliedVolatility")
+                if iv is None or not (0 < float(iv) < 5):
+                    continue
+                strike = float(row["strike"])
+                rows.append({
+                    "expiry": exp,
+                    "option_type": kind,
+                    "strike": strike,
+                    "bid": row.get("bid"),
+                    "ask": row.get("ask"),
+                    "volume": row.get("volume"),
+                    "open_interest": row.get("openInterest"),
+                    "iv": float(iv),
+                    **_model_greeks(spot, strike, exp, float(iv), kind),
+                })
+    df = pd.DataFrame(rows)
+    if df.empty:
+        raise RuntimeError(f"Yahoo returned no usable contracts for {yahoo_sym}")
+    df["expiry"] = pd.to_datetime(df["expiry"])
+    for c in ("bid", "ask", "iv", "cboe_delta", "cboe_gamma",
+              "cboe_theta", "cboe_vega"):
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+    return _dedupe(df), spot
+
+
+def _fetch_cboe(cboe_sym: str) -> tuple[pd.DataFrame, float | None]:
+    """Full chain from CBOE delayed quotes (one quick try — used as a
+    fallback now that Cloudflare blocks it from servers)."""
+    data = _get(CBOE_URL.format(cboe_sym), tries=1)["data"]
     und = data.get("current_price") or data.get("close")
     rows = []
     for o in data.get("options", []):
@@ -88,15 +171,30 @@ def fetch_chain(ticker: str) -> tuple[pd.DataFrame, float | None]:
         for c in ("bid", "ask", "iv", "cboe_delta", "cboe_gamma",
                   "cboe_theta", "cboe_vega"):
             df[c] = pd.to_numeric(df[c], errors="coerce")
-        # CBOE returns alternate-root listings alongside the standard
-        # chain (B1VDA next to NVDA, B1SPY next to SPY, SPXW/SPXO next to
-        # SPX) that parse to the same (expiry, strike, type) — the
-        # alternate rows carry ~zero OI/volume and stale-looking quotes,
-        # and the duplicates crash the Chain table pivot downstream.
-        # Keep the most liquid contract per key (volume, then OI).
-        df = (df.assign(_vol=df["volume"].fillna(0),
-                        _oi=df["open_interest"].fillna(0))
-                .sort_values(["_vol", "_oi"], ascending=False)
-                .drop_duplicates(subset=["expiry", "strike", "option_type"])
-                .drop(columns=["_vol", "_oi"]).reset_index(drop=True))
+        df = _dedupe(df)
     return df, (float(und) if und else None)
+
+
+def fetch_chain(ticker: str) -> tuple[pd.DataFrame, float | None, str]:
+    """Fetch the full chain for one ticker, Yahoo first, CBOE fallback.
+
+    Returns (chain DataFrame, underlying price or None, source name).
+    Raises RuntimeError if both sources fail.
+    """
+    cboe_sym, yahoo_sym = resolve_ticker(ticker)
+    errors = []
+    try:
+        df, spot = _fetch_yahoo(yahoo_sym)
+        if not df.empty and spot:
+            return df, spot, "Yahoo Finance"
+        errors.append("Yahoo: empty chain")
+    except Exception as e:  # noqa: BLE001 - fall through to CBOE
+        errors.append(f"Yahoo: {e}")
+    try:
+        df, spot = _fetch_cboe(cboe_sym)
+        if not df.empty and spot:
+            return df, spot, "CBOE"
+        errors.append("CBOE: empty chain")
+    except Exception as e:  # noqa: BLE001 - report both failures
+        errors.append(f"CBOE: {e}")
+    raise RuntimeError(f"No chain data for {ticker} ({'; '.join(errors)})")

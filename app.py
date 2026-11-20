@@ -98,16 +98,15 @@ def load_closes(tickers: tuple, period: str) -> pd.DataFrame:
 
 @st.cache_data(ttl=900, show_spinner=False)
 def load_chain_bundle(ticker: str):
-    """Live CBOE delayed chain + underlying + fetch time (15-min cache).
+    """Live option chain + underlying + fetch time + source (15-min cache).
 
     Raises RuntimeError on fetch failure or an empty chain (never cached,
     so the next visit retries fresh).
     """
-    cboe_sym, _ = chains.resolve_ticker(ticker)
-    chain, spot = chains.fetch_chain(cboe_sym)
+    chain, spot, src = chains.fetch_chain(ticker)
     if chain.empty or spot is None:
         raise RuntimeError(f"No chain data for {ticker}")
-    return chain, spot, datetime.now(timezone.utc)
+    return chain, spot, datetime.now(timezone.utc), src
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
@@ -828,7 +827,7 @@ elif tool == "Strategy Tester":
     lookback = st.sidebar.selectbox("Lookback", list(PERIODS), index=2)
     vol_mode = st.sidebar.radio(
         "Volatility",
-        ["Trailing 63d realized", "Fixed IV", "Live ATM IV (CBOE chain)",
+        ["Trailing 63d realized", "Fixed IV", "Live ATM IV (option chain)",
          "Historical ATM IV (archive)"],
         index=0)
     fixed_iv = st.sidebar.number_input("Fixed IV %", min_value=1.0,
@@ -879,10 +878,10 @@ elif tool == "Strategy Tester":
             st.sidebar.warning(
                 f"No archive ATM IV for {ticker} — falling back to "
                 "trailing 63d realized vol.")
-    if vol_mode == "Live ATM IV (CBOE chain)":
+    if vol_mode == "Live ATM IV (option chain)":
         _live_iv = None
         try:
-            _lchain, _lspot, _ = load_chain_bundle(ticker)
+            _lchain, _lspot, _, _src = load_chain_bundle(ticker)
             _lexps = [e for e in vol.expiries(_lchain) if vol.dte(e) >= 1]
             if _lexps and _lspot:
                 _live_iv = vol.atm_iv(_lchain, _lexps[0], _lspot)
@@ -1010,8 +1009,8 @@ elif tool == "Strategy Tester":
 # ========================= OPTIONS ANALYTICS =========================
 elif tool == "Options Analytics":
     st.title("Options Analytics")
-    st.caption("Greeks and the volatility surface on the live CBOE delayed "
-               "option chain (~15 min).")
+    st.caption("Greeks and the volatility surface on the live "
+               "option chain (~15 min delayed).")
     show_disclaimer()
     gl.show_glossary("Options Analytics")
 
@@ -1024,7 +1023,7 @@ elif tool == "Options Analytics":
 
     with st.spinner(f"Fetching {oa_ticker} option chain…"):
         try:
-            chain, spot, fetched_at = load_chain_bundle(oa_ticker)
+            chain, spot, fetched_at, src = load_chain_bundle(oa_ticker)
             q = div_yield(oa_ticker)
             rf = risk_free_rate()
         except RuntimeError:
@@ -1249,7 +1248,7 @@ elif tool == "Options Analytics":
     else:
         exercise_note = ("Listed equity options are American-style, so "
                          "deep-ITM greeks are approximate.")
-    st.caption(f"Chain as of {fetched_at:%H:%M} UTC (CBOE delayed ~15 min) · "
+    st.caption(f"Chain as of {fetched_at:%H:%M} UTC ({src}, ~15 min delayed) · "
                f"r={rf:.1%} (3M T-bill), q={q:.2%} · Greeks via Black-Scholes "
                f"(European); {exercise_note} Not investment advice.")
 

@@ -19,6 +19,7 @@ import urllib.request
 from datetime import date
 
 import pandas as pd
+import requests
 import yfinance as yf
 
 import greeks as _gk
@@ -93,30 +94,51 @@ def _dedupe(df: pd.DataFrame) -> pd.DataFrame:
               .drop(columns=["_vol", "_oi"]).reset_index(drop=True))
 
 
+class _TimeoutSession(requests.Session):
+    """requests session with a per-request timeout. yfinance passes no
+    timeout of its own, so a tarpitted Yahoo request can hang a tab
+    indefinitely; every Yahoo call through this session is capped."""
+
+    def request(self, *args, **kwargs):
+        kwargs.setdefault("timeout", 15)
+        return super().request(*args, **kwargs)
+
+
 def _fetch_yahoo(yahoo_sym: str,
                  max_expiries: int = _MAX_EXPIRIES) -> tuple[pd.DataFrame, float]:
     """Full chain from Yahoo Finance option chains (one request/expiry).
 
-    Retries 3x with backoff: Yahoo rate-limits Streamlit Cloud's shared
-    egress IPs intermittently (t.options comes back empty), and a retry
-    a few seconds later usually succeeds.
+    Bounded (2026-11-20, midday): Yahoo intermittently rate-limits
+    Streamlit Cloud's shared IPs and sometimes tarpits instead of
+    failing fast — an unbounded 3-attempt retry hung the USMS GEX tab
+    for 6+ minutes. Each attempt now has a 60s deadline and every
+    request a 15s timeout, and the second attempt runs only when the
+    first failed fast. A slow failure is never retried.
     """
     last = None
-    for attempt in range(3):
+    for attempt in range(2):
+        t0 = time.monotonic()
         try:
-            return _fetch_yahoo_once(yahoo_sym, max_expiries)
-        except Exception as e:  # noqa: BLE001 - retry, then report
+            return _fetch_yahoo_once(yahoo_sym, max_expiries,
+                                     time.monotonic() + 60)
+        except Exception as e:  # noqa: BLE001 - retry once if fast, else report
             last = e
-            time.sleep(5 * (attempt + 1))
-    raise RuntimeError(f"Yahoo failed for {yahoo_sym} after 3 tries: {last}")
+            if attempt == 0 and time.monotonic() - t0 < 10:
+                time.sleep(3)
+                continue
+            break
+    raise RuntimeError(f"Yahoo failed for {yahoo_sym}: {last}")
 
 
 def _fetch_yahoo_once(yahoo_sym: str,
-                      max_expiries: int = _MAX_EXPIRIES) -> tuple[pd.DataFrame, float]:
-    t = yf.Ticker(yahoo_sym)
+                      max_expiries: int = _MAX_EXPIRIES,
+                      deadline: float = None) -> tuple[pd.DataFrame, float]:
+    t = yf.Ticker(yahoo_sym, session=_TimeoutSession())
     expiries = list(t.options or [])
     if not expiries:
         raise RuntimeError(f"Yahoo returned no expiries for {yahoo_sym}")
+    if deadline is not None and time.monotonic() > deadline:
+        raise RuntimeError(f"Yahoo timed out for {yahoo_sym}")
     hist = t.history(period="1d")
     if hist is not None and not hist.empty:
         spot = float(hist["Close"].iloc[-1])
@@ -125,11 +147,18 @@ def _fetch_yahoo_once(yahoo_sym: str,
     if not spot:
         raise RuntimeError(f"Yahoo returned no spot for {yahoo_sym}")
     rows = []
+    fails = 0
     for exp in expiries[:max_expiries]:
+        if deadline is not None and time.monotonic() > deadline:
+            break
         try:
             chain = t.option_chain(exp)
         except Exception:  # noqa: BLE001 - skip an expiry that fails
+            fails += 1
+            if fails >= 3:
+                break
             continue
+        fails = 0
         for kind, frame in (("call", chain.calls), ("put", chain.puts)):
             for _, row in frame.iterrows():
                 iv = row.get("impliedVolatility")

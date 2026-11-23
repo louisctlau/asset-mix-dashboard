@@ -109,6 +109,60 @@ def load_chain_bundle(ticker: str):
     return chain, spot, datetime.now(timezone.utc), src
 
 
+ARCHIVED_CHAIN_URL = ("https://raw.githubusercontent.com/louisctlau/"
+                      "asset-mix-dashboard/main/data/latest_gex_chains.csv")
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def load_archived_chain(ticker: str):
+    """Latest archived chain for one ticker (fallback when the live
+    Yahoo/CBOE fetch fails — Yahoo 429s Streamlit Cloud's shared IPs
+    most days now, and CBOE is Cloudflare-blocked).
+
+    Returns (chain, spot, snapshot_date) in the app's chain schema, or
+    None when the ticker is not in the archive. Reads the CSV the daily
+    archive job pushes (data/latest_gex_chains.csv); local copy as
+    fallback. The archive's greek columns map onto the app's cboe_*
+    names — same shape as the Yahoo path, so vol surface, greeks and
+    GEX all render unchanged, just as of the snapshot close.
+    """
+    df = None
+    for src in (ARCHIVED_CHAIN_URL,
+                Path(__file__).resolve().parent / "data"
+                / "latest_gex_chains.csv"):
+        try:
+            df = pd.read_csv(src, parse_dates=["snapshot_date", "expiry"])
+            break
+        except Exception:
+            df = None
+    if df is None or df.empty:
+        return None
+    sub = df[df["ticker"].astype(str).str.upper()
+             == ticker.upper()].copy()
+    if sub.empty:
+        return None
+    snap = pd.to_datetime(sub["snapshot_date"].iloc[0]).date()
+    spot = float(sub["underlying_price"].median())
+    chain = pd.DataFrame({
+        "expiry": pd.to_datetime(sub["expiry"]),
+        "option_type": sub["option_type"],
+        "strike": pd.to_numeric(sub["strike"], errors="coerce"),
+        "bid": pd.to_numeric(sub["bid"], errors="coerce"),
+        "ask": pd.to_numeric(sub["ask"], errors="coerce"),
+        "volume": pd.to_numeric(sub["volume"], errors="coerce"),
+        "open_interest": pd.to_numeric(sub["open_interest"],
+                                       errors="coerce"),
+        "iv": pd.to_numeric(sub["iv"], errors="coerce"),
+        "cboe_delta": pd.to_numeric(sub["delta"], errors="coerce"),
+        "cboe_gamma": pd.to_numeric(sub["gamma"], errors="coerce"),
+        "cboe_theta": pd.to_numeric(sub["theta"], errors="coerce"),
+        "cboe_vega": pd.to_numeric(sub["vega"], errors="coerce"),
+    }).dropna(subset=["strike"]).reset_index(drop=True)
+    if chain.empty:
+        return None
+    return chain, spot, snap
+
+
 @st.cache_data(ttl=86400, show_spinner=False)
 def load_atm_iv_30d() -> dict | None:
     """Historical 30-day constant-maturity ATM IV, per ticker.
@@ -1021,16 +1075,31 @@ elif tool == "Options Analytics":
         st.warning("Enter a ticker.")
         st.stop()
 
+    src_note = None
     with st.spinner(f"Fetching {oa_ticker} option chain…"):
         try:
             chain, spot, fetched_at, src = load_chain_bundle(oa_ticker)
-            q = div_yield(oa_ticker)
-            rf = risk_free_rate()
+            src_note = f"{src}, ~15 min delayed"
         except RuntimeError:
-            st.error(f"Couldn't load an option chain for {oa_ticker} — "
-                     "check the symbol (US stocks, ETFs and index options) "
-                     "and try again in a minute.")
-            st.stop()
+            # Live Yahoo/CBOE fetch failed (Yahoo 429s Streamlit Cloud's
+            # shared IPs most days now; CBOE is Cloudflare-blocked) —
+            # fall back to the latest daily archive snapshot so the tool
+            # still renders, labelled as archived. Tickers outside the
+            # archive still hit the error below.
+            arch = load_archived_chain(oa_ticker)
+            if arch is None:
+                st.error(f"Couldn't load an option chain for {oa_ticker} — "
+                         "check the symbol (US stocks, ETFs and index options) "
+                         "and try again in a minute.")
+                st.stop()
+            chain, spot, snap = arch
+            fetched_at = datetime.now(timezone.utc)
+            src_note = (f"daily archive, {snap} close — live chain "
+                        "unavailable")
+            st.info(f"Live chain unavailable — showing the latest archived "
+                    f"chain (as of {snap} close).")
+        q = div_yield(oa_ticker)
+        rf = risk_free_rate()
 
     exp_list = [e for e in vol.expiries(chain) if vol.dte(e) >= 1]
     if not exp_list:
@@ -1248,7 +1317,7 @@ elif tool == "Options Analytics":
     else:
         exercise_note = ("Listed equity options are American-style, so "
                          "deep-ITM greeks are approximate.")
-    st.caption(f"Chain as of {fetched_at:%H:%M} UTC ({src}, ~15 min delayed) · "
+    st.caption(f"Chain as of {fetched_at:%H:%M} UTC ({src_note}) · "
                f"r={rf:.1%} (3M T-bill), q={q:.2%} · Greeks via Black-Scholes "
                f"(European); {exercise_note} Not investment advice.")
 

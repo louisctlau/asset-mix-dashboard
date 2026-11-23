@@ -1,5 +1,10 @@
 # Changelog — Portfolio Lab
 
+## 2026-11-23 — GEX charts render from the daily archive when live chains fail
+- Yahoo now rate-limits Streamlit Cloud's shared IPs (HTTP 429) most days, so Options Analytics died outright ("Couldn't load an option chain") and the GEX, vol-surface and greeks sections never rendered.
+- The daily archive now publishes `data/latest_gex_chains.csv` — the latest snapshot's full chains (all expiries, all 9 archived tickers) — and Options Analytics falls back to it when the live Yahoo/CBOE fetch fails, labelled "daily archive, <date> close — live chain unavailable". Vol smile, term structure, skew, greeks and GEX all render from the archived chain; tickers outside the archive still show the error.
+- The archive universe grew from 7 to 9 tickers: QQQ and IWM joined, so the USMS GEX tab's Nasdaq/Russell proxies have archive coverage too. `scripts/build_latest_gex_chains.py` builds the CSV from the latest parquet; the 17:00 archive job rebuilds and pushes it daily. Archive fallback verified locally (AppTest, live fetch forced to fail): SPY/QQQ/IWM GEX metrics match the Nov 23 history rows exactly.
+
 ## 2026-11-20 — Option chains switched to Yahoo Finance (CBOE blocked)
 - CBOE moved its delayed-quotes API to cdn-api.cboe.com behind Cloudflare bot protection: every server-side fetch (urllib, curl, even a real browser) now gets a 403 "Attention Required" page, so Options Analytics and the Strategy Tester's live-ATM-IV mode stopped loading.
 - `option_chains.py` now fetches from Yahoo Finance option chains first (bid/ask, volume, open interest, IV) and fills the delta/gamma columns with Black-Scholes model values (r = 5%, q = 0); CBOE stays as a one-shot fallback. The tab, vol surface, skew, GEX and chain table are unchanged — the footer now names the source actually served.

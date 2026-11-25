@@ -1,5 +1,9 @@
 # Changelog — Portfolio Lab
 
+## 2026-11-25 — SPX/RUT/NDX join the archive so index GEX has a fallback
+- Options Analytics died outright for SPX ("Couldn't load an option chain") whenever the live fetch failed: Yahoo 429s Streamlit Cloud's IPs and CBOE is Cloudflare-blocked, and the archive fallback only covered the 9 equity/ETF tickers — SPX was never in it, so `load_archived_chain("SPX")` returned nothing.
+- The archive universe grew from 9 to 12 tickers: SPX, RUT and NDX joined. The archive fetcher maps them to their exchange symbols (^SPX/^RUT/^NDX on Yahoo, _SPX/_RUT/_NDX on CBOE) while stamping rows with the canonical ticker, so the apps' archive lookups match. No app change needed — the fallback path already handles any ticker in the CSV. The 17:00 archive job now fetches all 12 daily; today's snapshot was fetched early so SPX GEX renders from the archive this afternoon.
+
 ## 2026-11-23 — GEX charts render from the daily archive when live chains fail
 - Yahoo now rate-limits Streamlit Cloud's shared IPs (HTTP 429) most days, so Options Analytics died outright ("Couldn't load an option chain") and the GEX, vol-surface and greeks sections never rendered.
 - The daily archive now publishes `data/latest_gex_chains.csv` — the latest snapshot's full chains (all expiries, all 9 archived tickers) — and Options Analytics falls back to it when the live Yahoo/CBOE fetch fails, labelled "daily archive, <date> close — live chain unavailable". Vol smile, term structure, skew, greeks and GEX all render from the archived chain; tickers outside the archive still show the error.

@@ -363,7 +363,7 @@ if tool == "Asset Mix":
         cols = st.columns(3)
         for i, name in enumerate(presets.PRESETS):
             if cols[i % 3].button(name, key=f"preset_{i}",
-                                  use_container_width=True):
+                                  width="stretch"):
                 _set_holdings(presets.preset_frame(name))
         up = st.file_uploader("Load config (JSON)", type="json",
                               key="cfg_upload")
@@ -391,7 +391,7 @@ if tool == "Asset Mix":
         for _slot in "ABC":
             if st.button(f"Save current mix → {_slot}",
                          key=f"save_slot_{_slot}",
-                         use_container_width=True):
+                         width="stretch"):
                 _raw = st.session_state.get("_last_edited",
                                             DEFAULT_HOLDINGS)
                 _cf = _raw.copy()
@@ -414,7 +414,7 @@ if tool == "Asset Mix":
     _pending = st.session_state.get("_pending_holdings")
     edited = st.sidebar.data_editor(
         _pending if _pending is not None else DEFAULT_HOLDINGS,
-        num_rows="dynamic", use_container_width=True,
+        num_rows="dynamic", width="stretch",
         column_config={
             "Ticker": st.column_config.TextColumn("Ticker", max_chars=10),
             "Weight %": st.column_config.NumberColumn("Weight %", min_value=0,
@@ -537,7 +537,7 @@ if tool == "Asset Mix":
         fig = px.pie(names=weights.index, values=weights.values, hole=0.45)
         fig.update_layout(showlegend=True, margin=dict(t=10, b=10, l=10, r=10),
                           height=320)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
     with right:
         st.subheader(f"Growth of ${capital:,}")
         gfig = go.Figure()
@@ -548,7 +548,7 @@ if tool == "Asset Mix":
                                       line=dict(dash="dash")))
         gfig.update_layout(yaxis_title="$", margin=dict(t=10, b=10, l=10, r=10),
                            height=320, legend=dict(orientation="h", y=1.05))
-        st.plotly_chart(gfig, use_container_width=True)
+        st.plotly_chart(gfig, width="stretch")
 
     st.subheader("Drawdown")
     dd = growth / growth.cummax() - 1
@@ -557,7 +557,7 @@ if tool == "Asset Mix":
                        line=dict(color="rgb(239,68,68)"))
     dfig.update_layout(yaxis_tickformat=".0%", height=240,
                        margin=dict(t=10, b=10, l=10, r=10))
-    st.plotly_chart(dfig, use_container_width=True)
+    st.plotly_chart(dfig, width="stretch")
 
     c1, c2 = st.columns(2)
     with c1:
@@ -566,7 +566,7 @@ if tool == "Asset Mix":
         hfig = px.imshow(corr, text_auto=".2f", aspect="auto",
                          color_continuous_scale="RdBu_r", zmin=-1, zmax=1)
         hfig.update_layout(height=380, margin=dict(t=10, b=10, l=10, r=10))
-        st.plotly_chart(hfig, use_container_width=True)
+        st.plotly_chart(hfig, width="stretch")
     with c2:
         st.subheader("Weight drift (latest vs target)")
         drift = pd.DataFrame({
@@ -576,7 +576,7 @@ if tool == "Asset Mix":
         drift["Drift (pp)"] = drift["Current %"] - drift["Target %"]
         drift = drift.round(1)
         st.dataframe(drift.sort_values("Drift (pp)", key=abs, ascending=False),
-                     use_container_width=True)
+                     width="stretch")
         st.caption(f"Rebalancing: {rebalance.lower()} · "
                    f"{growth.index[0].date()} → {growth.index[-1].date()}")
 
@@ -608,7 +608,7 @@ if tool == "Asset Mix":
             _hd["Portfolio %"] = (_hd["weight"] * 100).round(2)
             st.dataframe(_hd[["symbol", "name", "Portfolio %"]].rename(
                 columns={"symbol": "Underlying", "name": "Name"}),
-                use_container_width=True, hide_index=True)
+                width="stretch", hide_index=True)
         else:
             st.caption("No holdings data available for this mix.")
     with _rh:
@@ -623,7 +623,7 @@ if tool == "Asset Mix":
                                                         r=10),
                                 yaxis_title="", xaxis_title="% of portfolio")
             _sfig.update_traces(marker_color="#636EFA")
-            st.plotly_chart(_sfig, use_container_width=True)
+            st.plotly_chart(_sfig, width="stretch")
         else:
             st.caption("No sector data available for this mix.")
 
@@ -660,7 +660,7 @@ if tool == "Asset Mix":
         rfig.update_layout(title=title, yaxis_tickformat=fmt, height=260,
                            margin=dict(t=40, b=10, l=10, r=10),
                            legend=dict(orientation="h", y=1.05))
-        st.plotly_chart(rfig, use_container_width=True)
+        st.plotly_chart(rfig, width="stretch")
 
     st.subheader("Monte Carlo — 1 year forward")
     monthly = port_rets.resample("ME").apply(lambda x: (1 + x).prod() - 1)
@@ -698,7 +698,7 @@ if tool == "Asset Mix":
         mfig.update_layout(yaxis_title="$", xaxis_title="Months ahead",
                            height=360, margin=dict(t=10, b=10, l=10, r=10),
                            legend=dict(orientation="h", y=1.05))
-        st.plotly_chart(mfig, use_container_width=True)
+        st.plotly_chart(mfig, width="stretch")
         st.caption("2,000 paths; monthly steps resampled with replacement "
                    "from this portfolio's own history. Buy-and-hold assumed "
                    "within each path (rebalance not modeled); no fees, "
@@ -736,7 +736,7 @@ if tool == "Asset Mix":
                     f"({_r['recovery_date']})"
                     if _r.get("recovery_days") is not None else "—"),
             })
-        st.dataframe(pd.DataFrame(_erows), use_container_width=True,
+        st.dataframe(pd.DataFrame(_erows), width="stretch",
                      hide_index=True)
         for _r in _eps:
             if _r.get("note"):
@@ -806,7 +806,7 @@ if tool == "Asset Mix":
                     yaxis_title="$", height=340,
                     margin=dict(t=10, b=10, l=10, r=10),
                     legend=dict(orientation="h", y=1.05))
-                st.plotly_chart(_cfig, use_container_width=True)
+                st.plotly_chart(_cfig, width="stretch")
                 _morder = ["Total return", "CAGR", "Volatility (ann.)",
                            "Sharpe (rf=0)", "Max drawdown", "Best year",
                            "Worst year"]
@@ -836,7 +836,7 @@ if tool == "Asset Mix":
                             if v == _win else "" for v in _mdf.loc[_idx]]
                 st.dataframe(_dispdf.style.apply(lambda _d: _styles,
                                                  axis=None),
-                             use_container_width=True)
+                             width="stretch")
 
     gdf = pd.DataFrame({"Portfolio": growth})
     for name, bs in bench_series.items():
@@ -1006,7 +1006,7 @@ elif tool == "Strategy Tester":
     efig.update_layout(yaxis_title="$", height=360,
                        margin=dict(t=10, b=10, l=10, r=10),
                        legend=dict(orientation="h", y=1.05))
-    st.plotly_chart(efig, use_container_width=True)
+    st.plotly_chart(efig, width="stretch")
 
     st.subheader("All strategies — side by side")
     st.caption("Same ticker, lookback, expiry and volatility settings for "
@@ -1023,7 +1023,7 @@ elif tool == "Strategy Tester":
         # capital (equity curve crosses zero) — show "n/a", not a blank.
         disp["CAGR"] = disp["CAGR"].where(comp["CAGR"].notna(), "n/a")
         disp["Sharpe"] = disp["Sharpe"].round(2)
-        st.dataframe(disp, use_container_width=True)
+        st.dataframe(disp, width="stretch")
         if comp["CAGR"].isna().any():
             st.caption("n/a — CAGR is undefined when cumulative losses "
                        "exceed first-trade capital (the equity curve "
@@ -1038,7 +1038,7 @@ elif tool == "Strategy Tester":
                     "Capital"]:
             show[col] = show[col].round(2)
         show["IV"] = (show["IV"] * 100).round(1).astype(str) + "%"
-        st.dataframe(show, use_container_width=True)
+        st.dataframe(show, width="stretch")
         st.download_button(
             "Download trade log (CSV)", trades.to_csv(index=False),
             f"trade_log_{ticker}_{strat_name}.csv".replace(" ", "_"),
@@ -1138,7 +1138,7 @@ elif tool == "Options Analytics":
         sfig.update_layout(yaxis_title="IV %", xaxis_title="Strike",
                            height=340, margin=dict(t=10, b=10, l=10, r=10),
                            legend=dict(orientation="h", y=1.05))
-        st.plotly_chart(sfig, use_container_width=True)
+        st.plotly_chart(sfig, width="stretch")
     with right:
         st.subheader("Term structure — ATM IV")
         tfig = go.Figure()
@@ -1163,7 +1163,7 @@ elif tool == "Options Analytics":
         tfig.update_layout(yaxis_title="IV %", xaxis_title="Days to expiry",
                            height=340, margin=dict(t=10, b=10, l=10, r=10),
                            showlegend=False)
-        st.plotly_chart(tfig, use_container_width=True)
+        st.plotly_chart(tfig, width="stretch")
         if _earn_note:
             st.caption(_earn_note)
 
@@ -1178,7 +1178,7 @@ elif tool == "Options Analytics":
                        xaxis_title="Days to expiry", height=300,
                        margin=dict(t=10, b=10, l=10, r=10),
                        legend=dict(orientation="h", y=1.05))
-    st.plotly_chart(kfig, use_container_width=True)
+    st.plotly_chart(kfig, width="stretch")
     st.caption("Risk reversal < 0: downside puts pricier than upside calls — "
                "the usual equity put skew. Butterfly: smile convexity.")
 
@@ -1202,7 +1202,7 @@ elif tool == "Options Analytics":
         pfig.update_layout(yaxis_title="IV %", height=260,
                            margin=dict(t=10, b=10, l=10, r=10),
                            showlegend=False)
-        st.plotly_chart(pfig, use_container_width=True)
+        st.plotly_chart(pfig, width="stretch")
         _rank_src = ("today's live" if ivp.get("live")
                      else "the latest archived")
         st.caption(f"ATM IV vs its own history — series accrues from "
@@ -1233,7 +1233,7 @@ elif tool == "Options Analytics":
         m4.metric("γflip",
                   f"{gg['zero_gamma']:.0f}" if gg["zero_gamma"] else "—")
         gfig = gex.gex_chart(gg, f"Net GEX by strike — {oa_ticker} ($M/pt)")
-        st.plotly_chart(gfig, use_container_width=True)
+        st.plotly_chart(gfig, width="stretch")
         exp_str = ", ".join(pd.Timestamp(e).strftime("%b %d")
                             for e in gg["expiries"])
         st.caption(gex.gex_read(gg) + f" Nearest 3 expiries: {exp_str}.")
@@ -1259,7 +1259,7 @@ elif tool == "Options Analytics":
         hfig.update_layout(yaxis_title="Net GEX ($M/pt)", height=300,
                            margin=dict(t=10, b=10, l=10, r=10),
                            legend=dict(orientation="h", y=1.05))
-        st.plotly_chart(hfig, use_container_width=True)
+        st.plotly_chart(hfig, width="stretch")
         st.caption(f"Daily chain snapshots, as of {gh['as_of']}. Net GEX "
                    f"from the nearest 3 expiries each day.")
 
@@ -1283,7 +1283,7 @@ elif tool == "Options Analytics":
         gfig.update_layout(yaxis_title=glabel, xaxis_title="Strike",
                            height=340, margin=dict(t=10, b=10, l=10, r=10),
                            legend=dict(orientation="h", y=1.05))
-        st.plotly_chart(gfig, use_container_width=True)
+        st.plotly_chart(gfig, width="stretch")
         if gkey == "vanna":
             st.caption("Vanna > 0: the position's delta grows if vol rises — "
                        "long-vol positions get longer into a spike.")
@@ -1308,7 +1308,7 @@ elif tool == "Options Analytics":
             if f"volume_{t}" in wide:
                 disp[f"{T} vol"] = wide[f"volume_{t}"].fillna(0).astype(int)
         disp.index.name = "Strike"
-        st.dataframe(disp, use_container_width=True)
+        st.dataframe(disp, width="stretch")
 
     if oa_ticker == "VIX":
         exercise_note = ("VIX options are on futures — greeks approximate.")

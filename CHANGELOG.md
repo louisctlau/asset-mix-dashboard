@@ -1,5 +1,9 @@
 # Changelog — Portfolio Lab
 
+## 2026-11-27 — `use_container_width` migrated to `width="stretch"` (deprecated in Streamlit 1.64)
+- All 26 `use_container_width=True` call sites in `app.py` (Plotly charts, dataframes, the preset/slot buttons, the holdings data editor) now use `width="stretch"` — the documented replacement. Behaviour is unchanged: charts, tables and the editor were already full-width, and the buttons keep stretching (buttons default to `width="content"`, so the explicit value matters there).
+- `requirements.txt` floor raised to `streamlit>=1.47`, the version that introduced the `width` parameter. Verified locally with AppTest: no exceptions, app renders.
+
 ## 2026-11-25 — SPX/RUT/NDX join the archive so index GEX has a fallback
 - Options Analytics died outright for SPX ("Couldn't load an option chain") whenever the live fetch failed: Yahoo 429s Streamlit Cloud's IPs and CBOE is Cloudflare-blocked, and the archive fallback only covered the 9 equity/ETF tickers — SPX was never in it, so `load_archived_chain("SPX")` returned nothing.
 - The archive universe grew from 9 to 12 tickers: SPX, RUT and NDX joined. The archive fetcher maps them to their exchange symbols (^SPX/^RUT/^NDX on Yahoo, _SPX/_RUT/_NDX on CBOE) while stamping rows with the canonical ticker, so the apps' archive lookups match. No app change needed — the fallback path already handles any ticker in the CSV. The 17:00 archive job now fetches all 12 daily; today's snapshot was fetched early so SPX GEX renders from the archive this afternoon.
